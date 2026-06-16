@@ -1,16 +1,16 @@
-# Odysseus
+# Aigenchain
 
 > **Branch note:** `dev` is the default branch and contains the latest development changes, but it may be unstable. For the more stable curated branch, use [`main`](https://github.com/pewdiepie-archdaemon/odysseus/tree/main).
 
 ```
 ───────────────────────────────────────────────
- ⊹ ࣪ ˖ ૮( ˶ᵔ ᵕ ᵔ˶ )っ  Odysseus vers. 1.0
+ ⊹ ࣪ ˖ ૮( ˶ᵔ ᵕ ᵔ˶ )っAigenchainus vers. 1.0
 ───────────────────────────────────────────────
 ```
 
-![Odysseus](docs/odysseus.jpg)
+![Aigenchain](docs/odysseus.jpg)
 
-A self-hosted AI workspace -- meant to be the self-hosted version of the UI experience you get from ChatGPT and Claude. But with more jank and fun. Running on your own hardware, with your own data -- local-first, privacy-first, and no trojan.
+A self-hosted AI workspace -- meant to be the self-hosted version of the UI experience you get from ChatGPT and Claude. But with more jank and fun. ∑Running on your own hardware, with your own data -- local-first, privacy-first, and no trojan.
 
 ## Features
   - **Chat** -- chat with any local model or API; adding them is super simple.<br>　<sub>vLLM · llama.cpp · Ollama · OpenRouter · OpenAI · GitHub Copilot</sub>
@@ -90,7 +90,7 @@ connect to API or remote model servers instead. Use `--host 0.0.0.0` only when y
 
 ### Apple Silicon
 Docker on macOS cannot use the Metal GPU. For GPU-accelerated Cookbook on an
-M-series Mac, run Odysseus natively:
+M-series Mac, run Aigenchain natively:
 
 ```bash
 git clone https://github.com/pewdiepie-archdaemon/odysseus.git
@@ -118,7 +118,7 @@ expose this port directly to the public internet. To build a clickable app wrapp
 <details>
 <summary>Cookbook, GPU, Ollama, and troubleshooting notes</summary>
 
-**Docker bundled services.** Compose starts Odysseus, ChromaDB, SearXNG, and
+**Docker bundled services.** Compose starts Aigenchain, ChromaDB, SearXNG, and
 ntfy. Odysseus and the bundled service ports bind to `127.0.0.1` by default, so
 they are reachable from the host but not exposed to your LAN/public internet
 unless you opt in.
@@ -129,7 +129,7 @@ serve engines live in `./data/local` (`~/.local` in the container), so they
 survive container recreation.
 
 **Remote servers.** In **Cookbook -> Settings -> Servers**, generate the
-Odysseus SSH key and add the public key to the remote server's
+Aigenchain SSH key and add the public key to the remote server's
 `~/.ssh/authorized_keys`. From the host you can also run:
 
 ```bash
@@ -423,7 +423,7 @@ To enable the browser MCP (page navigation, screenshots, vision), run once:
 npx -y @playwright/mcp@latest --version
 ```
 
-That installs `@playwright/mcp` plus Playwright (~300MB total). Restart Odysseus and the server will register at startup.
+That installs `@playwright/mcp` plus Playwright (~300MB total). Restart Aigenchain and the server will register at startup.
 
 ## Architecture
 ```
