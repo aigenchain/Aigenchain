@@ -1,5 +1,5 @@
 services:
-  odysseus:
+  aigenchain-agent:
     build: .
     ports:
       - "${APP_BIND:-127.0.0.1}:${APP_PORT:-7000}:7000"
@@ -28,8 +28,8 @@ services:
       - RESEARCH_LLM_ENDPOINT=${RESEARCH_LLM_ENDPOINT:-}
       - HF_TOKEN=${HF_TOKEN:-}
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
-      - SEARXNG_INSTANCE=http://searxng:8080
-      - CHROMADB_HOST=chromadb
+      - SEARXNG_INSTANCE=http://aigenchain-searxng:8080
+      - CHROMADB_HOST=aigenchain-chromadb
       - CHROMADB_PORT=8000
       - DATABASE_URL=${DATABASE_URL:-sqlite:///./data/app.db}
       - AUTH_ENABLED=${AUTH_ENABLED:-true}
@@ -64,13 +64,13 @@ services:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
     depends_on:
-      searxng:
+      aigenchain-searxng:
         condition: service_healthy
-      chromadb:
+      aigenchain-chromadb:
         condition: service_started
     restart: unless-stopped
 
-  chromadb:
+  aigenchain-chromadb:
     image: docker.io/chromadb/chroma:latest
     ports:
       - "${CHROMADB_BIND:-127.0.0.1}:8100:8000"
@@ -80,7 +80,7 @@ services:
       - ANONYMIZED_TELEMETRY=FALSE
     restart: unless-stopped
 
-  searxng:
+  aigenchain-searxng:
     # Pinned, not :latest — odysseus waits on searxng's healthcheck
     # (depends_on: condition: service_healthy), so a broken upstream `latest`
     # tag blocks the whole app from starting. 2026.6.2 crashes on boot with
@@ -130,7 +130,7 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  ntfy:
+  aigenchain-ntfy:
     image: docker.io/binwiederhier/ntfy
     command: serve
     ports:
