@@ -1,95 +1,105 @@
-# AIGENCHAIN CONSTITUTION
+# Aigenchain Constitution
 
-## Konstitusi Resmi Aigenchain
+## Purpose
 
-### Status Dokumen
-
-Dokumen ini merupakan landasan tertinggi (Supreme Governing Document) bagi seluruh pengembangan, pengelolaan, dan evolusi ekosistem Aigenchain.
-
-Seluruh keputusan arsitektur, implementasi teknis, desain produk, dan strategi bisnis wajib mengacu pada konstitusi ini.
+This Constitution defines the immutable principles that govern the design, development, operation, and evolution of Aigenchain. Every architectural, engineering, and business decision must comply with this document unless an explicit constitutional revision is approved.
 
 ---
 
-# 1. Tujuan Utama
+# Article I — Identity
 
-Aigenchain dibangun sebagai platform kecerdasan buatan otonom yang beroperasi secara profesional, aman, dan berorientasi pada penciptaan nilai nyata melalui otomatisasi digital.
+Aigenchain is an independent software ecosystem wholly owned and controlled by its creators.
 
-Tujuan akhirnya adalah menjadi ekosistem produksi digital terpadu yang mampu membantu manusia merancang, membangun, mengelola, dan memelihara produk digital bernilai komersial tinggi.
+The project shall maintain its own identity, branding, architecture, documentation, and implementation without dependency on historical identities inherited from predecessor systems.
 
----
-
-# 2. Prinsip Inti
-
-Seluruh pengembangan Aigenchain wajib mengikuti prinsip berikut:
-
-1. Offline First.
-2. Privacy by Design.
-3. Security by Default.
-4. Modular Architecture.
-5. Extensible System.
-6. Long-Term Maintainability.
-7. Clean Code and Clean Documentation.
-8. Human-Centered Artificial Intelligence.
+Every component shall reinforce the Aigenchain brand.
 
 ---
 
-# 3. Kepemilikan
+# Article II — Mission
 
-Seluruh identitas, desain, dokumentasi, arsitektur, merek, logo, serta pengembangan Aigenchain merupakan aset resmi perusahaan dan tidak memiliki keterkaitan identitas dengan proyek sebelumnya.
-
-Setiap proses rebranding harus menghapus referensi lama secara menyeluruh.
+The primary mission of Aigenchain is to become an advanced autonomous digital operating system capable of assisting, creating, reasoning, and producing commercial-grade digital products with minimal human intervention.
 
 ---
 
-# 4. Filosofi Pengembangan
+# Article III — Offline-First Philosophy
 
-Aigenchain bukan sekadar chatbot.
+Offline execution is the default operating mode.
 
-Aigenchain adalah platform AI yang memiliki kemampuan untuk berkembang menjadi:
+Internet connectivity is considered an optional enhancement rather than a requirement.
 
-* Executive Assistant
-* Digital Factory
-* Automation Platform
-* Development Platform
-* Enterprise Intelligence System
-
-Setiap fitur baru harus memperkuat visi tersebut.
+Core capabilities must continue functioning without external services whenever technically feasible.
 
 ---
 
-# 5. Independensi Teknologi
+# Article IV — Privacy and Data Sovereignty
 
-Tidak ada teknologi pihak ketiga yang dianggap sebagai fondasi permanen.
+User data belongs exclusively to the user.
 
-Docker, Ollama, PostgreSQL, maupun teknologi lain hanya diposisikan sebagai komponen yang dapat diganti apabila terdapat solusi yang lebih baik.
+Personal information, memories, documents, conversations, and generated assets shall remain under local control unless explicit permission is granted.
 
-Aigenchain harus mempertahankan kemampuan untuk bermigrasi tanpa mengubah identitas maupun filosofi sistem.
-
----
-
-# 6. Standar Kualitas
-
-Setiap implementasi wajib mengutamakan:
-
-* keterbacaan,
-* stabilitas,
-* keamanan,
-* performa,
-* dokumentasi yang jelas,
-* serta kemudahan pemeliharaan jangka panjang.
-
-Kecepatan pengembangan tidak boleh mengorbankan kualitas arsitektur.
+Privacy is treated as a fundamental architectural principle rather than a feature.
 
 ---
 
-# 7. Prinsip Evolusi
+# Article V — Modularity
 
-Perubahan besar terhadap platform harus dilakukan secara bertahap dan terdokumentasi.
+Every subsystem should be independently maintainable.
 
-Setiap keputusan strategis wajib memiliki alasan teknis maupun bisnis yang dapat ditelusuri.
+Components should expose well-defined interfaces and minimize unnecessary dependencies.
+
+Loose coupling and high cohesion are mandatory engineering objectives.
 
 ---
 
-# 8. Aturan Perubahan Konstitusi
+# Article VI — Long-Term Maintainability
 
-Dokumen ini hanya boleh diubah apabila perubahan tersebut meningkatkan kualitas jangka panjang Aigenchain dan tetap sejalan dengan visi utama sebagai platform AI otonom profesional yang berorientasi pada privasi, keamanan, dan keberlanjutan.
+Short-term convenience must never compromise long-term maintainability.
+
+Readable architecture, predictable behavior, and sustainable engineering practices take precedence over temporary optimization.
+
+---
+
+# Article VII — Security by Design
+
+Security shall be incorporated into every layer of the platform.
+
+Authentication, authorization, encryption, validation, and auditability must be considered during design rather than after implementation.
+
+---
+
+# Article VIII — Local Intelligence
+
+Local AI inference is the preferred execution model.
+
+External APIs may be integrated when beneficial, but the platform should always preserve the ability to operate independently through local models and local infrastructure.
+
+---
+
+# Article IX — Product Quality
+
+Aigenchain is intended to produce production-ready outputs.
+
+Generated software should prioritize correctness, maintainability, documentation, testing, and security.
+
+---
+
+# Article X — Commercial Independence
+
+Aigenchain exists to strengthen the company's own digital ecosystem.
+
+The platform may create, package, and distribute commercial digital products directly without relying on third-party marketplaces as a core business strategy.
+
+---
+
+# Article XI — Architectural Consistency
+
+Major architectural decisions must be documented through Architecture Decision Records (ADR).
+
+No significant platform change should occur without documented reasoning.
+
+---
+
+# Article XII — Constitutional Priority
+
+If any implementation, documentation, roadmap, or future proposal conflicts with this Constitution, this Constitution shall take precedence until formally amended.

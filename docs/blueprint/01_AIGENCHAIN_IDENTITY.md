@@ -1,118 +1,109 @@
-# AIGENCHAIN IDENTITY
+# Aigenchain Identity
 
-## Identitas Resmi Aigenchain
+## Official Name
 
----
+**Aigenchain**
 
-# 1. Nama Resmi
+The official name of the platform, software ecosystem, and technology initiative is **Aigenchain**.
 
-Nama resmi platform ini adalah **Aigenchain**.
-
-Seluruh identitas visual, dokumentasi, kode sumber, aset digital, dan komunikasi resmi wajib menggunakan nama **Aigenchain** sebagai identitas utama.
+This name shall be used consistently across source code, documentation, interfaces, deployment environments, legal materials, branding assets, and commercial products.
 
 ---
 
-# 2. Definisi
+# Brand Position
 
-Aigenchain adalah platform kecerdasan buatan otonom (Autonomous Artificial Intelligence Platform) yang dirancang untuk membantu manusia berpikir, membangun, mengotomatisasi, dan menghasilkan produk digital secara profesional.
+Aigenchain is an advanced autonomous AI operating platform designed to function as a private, offline-first, production-oriented digital ecosystem.
 
-Aigenchain mengintegrasikan kemampuan reasoning, memory, automation, software engineering, knowledge management, dan orkestrasi sistem ke dalam satu ekosistem yang berjalan dengan prinsip privasi dan kendali penuh atas data.
-
----
-
-# 3. Posisi Produk
-
-Aigenchain bukan sekadar chatbot.
-
-Aigenchain merupakan platform AI yang dapat berkembang menjadi:
-
-* Executive AI Assistant
-* Personal Intelligence System
-* Development Assistant
-* Digital Factory
-* Automation Platform
-* Enterprise Intelligence Platform
+Its primary objective is to assist humans in reasoning, automation, software development, knowledge management, and commercial digital production.
 
 ---
 
-# 4. Filosofi
+# Core Characteristics
 
-Filosofi utama Aigenchain adalah:
+The identity of Aigenchain is defined by the following characteristics:
 
-> Membantu manusia menciptakan lebih banyak nilai melalui kolaborasi antara kecerdasan manusia dan kecerdasan buatan.
-
-Teknologi diposisikan sebagai alat untuk meningkatkan produktivitas, kreativitas, kualitas keputusan, dan efisiensi operasional.
-
----
-
-# 5. Prinsip Identitas
-
-Identitas Aigenchain dibangun di atas lima prinsip utama:
-
-1. Profesional.
-2. Andal.
-3. Aman.
-4. Modular.
-5. Berkelanjutan.
-
-Seluruh pengembangan wajib menjaga konsistensi terhadap kelima prinsip tersebut.
+* Autonomous by design
+* Offline-first architecture
+* Privacy-centric
+* Modular and extensible
+* Production-oriented
+* Security-focused
+* Long-term maintainable
+* Human-centered
+* Commercially independent
+* Engineering-driven
 
 ---
 
-# 6. Kepemilikan Identitas
+# Brand Philosophy
 
-Nama, logo, dokumentasi, desain visual, arsitektur, dan seluruh identitas Aigenchain merupakan aset resmi perusahaan.
+Aigenchain prioritizes substance over appearance.
 
-Setiap proses pengembangan wajib memastikan tidak terdapat identitas lama yang tersisa pada kode sumber, dokumentasi, konfigurasi, maupun antarmuka pengguna.
+Every feature should provide measurable value, predictable behavior, and sustainable engineering quality rather than superficial complexity.
 
----
-
-# 7. Independensi
-
-Aigenchain tidak bergantung pada teknologi tertentu sebagai identitasnya.
-
-Komponen seperti Docker, Ollama, PostgreSQL, atau teknologi pihak ketiga lainnya hanyalah bagian dari implementasi yang dapat berubah sesuai kebutuhan.
-
-Identitas Aigenchain tetap berdiri secara independen dari teknologi yang digunakan.
+The platform should evolve through deliberate architectural decisions instead of uncontrolled feature expansion.
 
 ---
 
-# 8. Target Pengguna
+# Visual Identity Principles
 
-Aigenchain dirancang untuk digunakan oleh:
+The visual language of Aigenchain should communicate:
 
-* Individu profesional.
-* Pengembang perangkat lunak.
-* Kreator digital.
-* Tim bisnis.
-* Organisasi.
-* Perusahaan.
-* Institusi yang membutuhkan otomatisasi berbasis AI.
+* Simplicity
+* Precision
+* Intelligence
+* Stability
+* Modern engineering
+* Professionalism
+* Trustworthiness
 
----
-
-# 9. Karakter Sistem
-
-Karakter yang harus selalu tercermin dalam Aigenchain adalah:
-
-* tenang,
-* cerdas,
-* sistematis,
-* transparan,
-* dapat dipercaya,
-* menghormati privasi,
-* berorientasi pada solusi,
-* dan berfokus pada kualitas jangka panjang.
+Design elements should avoid unnecessary decoration and instead reinforce clarity and usability.
 
 ---
 
-# 10. Identitas Masa Depan
+# Naming Standards
 
-Dalam jangka panjang, Aigenchain diproyeksikan berkembang menjadi platform AI terpadu yang memiliki kemampuan:
+Internal modules should adopt descriptive and stable names.
 
-* memahami konteks,
-* mengelola pengetahuan,
-* mengotomatisasi pekerjaan,
-* membangun perangkat lunak,
-* menghasilkan produk digital,
-* serta menjadi mitra strategis dalam pengambilan keputusan dan inovasi.
+Public-facing names should remain concise, memorable, and consistent with the Aigenchain ecosystem.
+
+Legacy names originating from predecessor systems must not appear in production interfaces, branding assets, documentation, or user experiences.
+
+---
+
+# Logo and Brand Assets
+
+Official logos, icons, favicons, color palettes, and typography shall be maintained under the branding asset repository.
+
+Every application, website, documentation page, installer, and deployment target should use the current official assets.
+
+---
+
+# Product Ecosystem
+
+Products developed under the Aigenchain ecosystem should share a unified architectural philosophy and visual identity while remaining independently maintainable.
+
+Consistency across products is considered a strategic objective.
+
+---
+
+# Communication Style
+
+Official communication should be:
+
+* Professional
+* Clear
+* Direct
+* Respectful
+* Technically accurate
+* Internationally understandable
+
+Marketing language must never compromise factual correctness.
+
+---
+
+# Ownership
+
+The Aigenchain identity, branding, architecture, and associated intellectual property belong exclusively to its owners.
+
+Future development shall reinforce and expand this identity while preserving its independence and long-term vision.
