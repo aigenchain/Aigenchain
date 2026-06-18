@@ -123,6 +123,7 @@ from .document_tools import (
 )
 
 # Implementations
+from runtime.tools.settings import do_manage_settings
 from runtime.tools.skills import do_manage_skills
 from runtime.tools.endpoints import do_manage_endpoints
 from runtime.tools.contacts import do_manage_contact, do_resolve_contact
@@ -134,6 +135,5 @@ from src.tool_implementations import (  # noqa: E402, F401
     do_manage_mcp,
     do_manage_webhooks,
     do_manage_tokens,
-    do_manage_settings,
     do_api_call,
 )
