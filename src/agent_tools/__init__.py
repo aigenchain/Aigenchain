@@ -123,9 +123,10 @@ from .document_tools import (
 )
 
 # Implementations
+from runtime.tools.skills import do_manage_skills
+
 from src.tool_implementations import (  # noqa: E402, F401
     do_search_chats,
-    do_manage_skills,
     do_manage_tasks,
     do_manage_endpoints,
     do_manage_mcp,
