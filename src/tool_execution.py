@@ -541,6 +541,7 @@ async def _execute_tool_block_impl(
     """
     from runtime.tools.skills import do_manage_skills
 from runtime.tools.tasks import do_manage_tasks
+from runtime.tools.endpoints import do_manage_endpoints
 
 from src.tool_implementations import (
         do_search_chats, do_api_call, do_manage_endpoints,
