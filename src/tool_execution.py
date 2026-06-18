@@ -545,6 +545,7 @@ from runtime.tools.endpoints import do_manage_endpoints
 from runtime.tools.contacts import do_manage_contact, do_resolve_contact
 from runtime.tools.research import do_manage_research, do_trigger_research
 from runtime.tools.settings import do_manage_settings
+from runtime.tools.mcp import do_manage_mcp
 
 from src.tool_implementations import (
         do_search_chats, do_api_call, do_manage_endpoints,
