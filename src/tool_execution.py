@@ -540,9 +540,10 @@ async def _execute_tool_block_impl(
     events while the command is in flight. Ignored by other tools.
     """
     from runtime.tools.skills import do_manage_skills
+from runtime.tools.tasks import do_manage_tasks
 
 from src.tool_implementations import (
-        do_search_chats, do_manage_tasks, do_api_call, do_manage_endpoints,
+        do_search_chats, do_api_call, do_manage_endpoints,
         do_manage_mcp, do_manage_webhooks, do_manage_tokens,
         do_manage_settings, do_manage_notes,
         do_manage_calendar,
