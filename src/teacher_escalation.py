@@ -414,7 +414,7 @@ async def escalate_and_learn(
     skill["action"] = "add"
 
     import json
-    from src.tool_implementations import do_manage_skills
+    from runtime.tools.skills import do_manage_skills
     try:
         result = await do_manage_skills(json.dumps(skill), owner=owner)
         if isinstance(result, dict) and not result.get("error"):
@@ -643,7 +643,7 @@ async def run_teacher_inline(
     skill.setdefault("teacher_model", teacher_spec)
 
     import json as _json
-    from src.tool_implementations import do_manage_skills
+    from runtime.tools.skills import do_manage_skills
     try:
         result = await do_manage_skills(_json.dumps(skill), owner=owner)
         if isinstance(result, dict) and not result.get("error"):
