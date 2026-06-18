@@ -539,9 +539,10 @@ async def _execute_tool_block_impl(
     (bash, python) so the agent loop can emit `tool_progress` SSE
     events while the command is in flight. Ignored by other tools.
     """
-    from src.tool_implementations import (
-        do_search_chats, do_manage_tasks,
-        do_manage_skills, do_api_call, do_manage_endpoints,
+    from runtime.tools.skills import do_manage_skills
+
+from src.tool_implementations import (
+        do_search_chats, do_manage_tasks, do_api_call, do_manage_endpoints,
         do_manage_mcp, do_manage_webhooks, do_manage_tokens,
         do_manage_settings, do_manage_notes,
         do_manage_calendar,
