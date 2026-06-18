@@ -543,6 +543,7 @@ async def _execute_tool_block_impl(
 from runtime.tools.tasks import do_manage_tasks
 from runtime.tools.endpoints import do_manage_endpoints
 from runtime.tools.contacts import do_manage_contact, do_resolve_contact
+from runtime.tools.research import do_manage_research, do_trigger_research
 
 from src.tool_implementations import (
         do_search_chats, do_api_call, do_manage_endpoints,
@@ -554,7 +555,7 @@ from src.tool_implementations import (
         do_list_downloads, do_cancel_download, do_search_hf_models, do_list_cached_models,
         do_list_serve_presets, do_serve_preset, do_adopt_served_model,
         do_list_cookbook_servers,
-        do_edit_image, do_trigger_research, do_manage_research, do_resolve_contact,
+        do_edit_image, do_resolve_contact,
         do_manage_contact,
         do_vault_search, do_vault_get, do_vault_unlock,
         do_app_api,
