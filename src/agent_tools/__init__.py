@@ -126,6 +126,7 @@ from .document_tools import (
 from runtime.tools.webhooks import do_manage_webhooks
 from runtime.tools.settings import do_manage_settings
 from runtime.tools.mcp import do_manage_mcp
+from runtime.tools.core import do_search_chats, do_api_call
 from runtime.tools.skills import do_manage_skills
 from runtime.tools.endpoints import do_manage_endpoints
 from runtime.tools.contacts import do_manage_contact, do_resolve_contact
