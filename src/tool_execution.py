@@ -549,6 +549,7 @@ async def _execute_tool_block_impl(
     from runtime.tools.mcp import do_manage_mcp
 from runtime.tools.core import do_search_chats, do_api_call
 
+from runtime.tools.vault import do_vault_search, do_vault_get, do_vault_unlock
 from runtime.tools.cookbook import (
     do_download_model,
     do_serve_model,
@@ -576,7 +577,6 @@ from runtime.tools.cookbook import (
         
         
         do_edit_image,
-        do_vault_search, do_vault_get, do_vault_unlock,
         do_app_api,
     )
 
