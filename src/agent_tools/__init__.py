@@ -123,6 +123,7 @@ from .document_tools import (
 )
 
 # Implementations
+from runtime.tools.webhooks import do_manage_webhooks
 from runtime.tools.settings import do_manage_settings
 from runtime.tools.mcp import do_manage_mcp
 from runtime.tools.skills import do_manage_skills
@@ -133,7 +134,6 @@ from runtime.tools.research import do_manage_research, do_trigger_research
 from src.tool_implementations import (  # noqa: E402, F401
     do_search_chats,
     do_manage_tasks,
-    do_manage_webhooks,
     do_manage_tokens,
     do_api_call,
 )
