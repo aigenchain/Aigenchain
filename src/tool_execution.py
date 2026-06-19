@@ -543,39 +543,44 @@ async def _execute_tool_block_impl(
     from runtime.tools.tasks import do_manage_tasks
     from runtime.tools.webhooks import do_manage_webhooks
     from runtime.tools.endpoints import do_manage_endpoints
-    from runtime.tools.contacts import do_manage_contact, do_resolve_contact
-    from runtime.tools.research import do_manage_research, do_trigger_research
+    from runtime.tools.contacts import (
+        do_manage_contact,
+        do_resolve_contact,
+    )
+    from runtime.tools.research import (
+        do_manage_research,
+        do_trigger_research,
+    )
     from runtime.tools.settings import do_manage_settings
     from runtime.tools.mcp import do_manage_mcp
-from runtime.tools.core import do_search_chats, do_api_call
-
-from runtime.tools.vault import do_vault_search, do_vault_get, do_vault_unlock
+    from runtime.tools.core import (
+        do_search_chats,
+        do_api_call,
+    )
+    from runtime.tools.vault import (
+        do_vault_search,
+        do_vault_get,
+        do_vault_unlock,
+    )
+    from runtime.tools.calendar import do_manage_calendar
 from runtime.tools.cookbook import (
-    do_download_model,
-    do_serve_model,
-    do_list_served_models,
-    do_stop_served_model,
-    
-    do_list_downloads,
-    do_cancel_download,
-    do_search_hf_models,
-    
-    
-    do_list_serve_presets,
-    do_serve_preset,
-    
-)
+        do_download_model,
+        do_serve_model,
+        do_list_served_models,
+        do_stop_served_model,
+        do_list_downloads,
+        do_cancel_download,
+        do_search_hf_models,
+        do_list_serve_presets,
+        do_serve_preset,
+        do_list_cached_models,
+        do_adopt_served_model,
+        do_list_cookbook_servers,
+    )
 
     from src.tool_implementations import (
-        
         do_manage_tokens,
         do_manage_notes,
-        do_manage_calendar,
-        do_stop_served_model,
-        
-        
-        
-        
         do_edit_image,
         do_app_api,
     )
