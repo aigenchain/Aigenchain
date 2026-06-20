@@ -563,6 +563,7 @@ async def _execute_tool_block_impl(
         do_vault_unlock,
     )
     from runtime.tools.calendar import do_manage_calendar
+    from runtime.tools.notes import do_manage_notes
     from runtime.tools.cookbook import (
         do_download_model,
         do_serve_model,
@@ -580,7 +581,6 @@ async def _execute_tool_block_impl(
 
     from src.tool_implementations import (
         do_manage_tokens,
-        do_manage_notes,
         do_edit_image,
         do_app_api,
     )
