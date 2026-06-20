@@ -5,12 +5,14 @@ Temporary extraction from src.tool_implementations.py during runtime
 modularization.
 """
 
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 
 from src.tool_implementations import (
     _parse_tool_args,
     logger,
 )
+
+from core.constants import internal_api_base
 
 
 async def do_manage_calendar(content: str, owner: Optional[str] = None) -> Dict:
