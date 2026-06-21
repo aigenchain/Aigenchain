@@ -1,5 +1,8 @@
-from src.tool_implementations import (
+from runtime.tools.api_impl import (
     do_api_call,
+)
+
+from src.tool_implementations import (
     do_app_api,
 )
 
