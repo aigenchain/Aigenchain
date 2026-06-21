@@ -1,4 +1,4 @@
-from src.tool_implementations import (
+from runtime.tools.cookbook_impl import (
     do_download_model,
     do_serve_model,
     do_list_served_models,
