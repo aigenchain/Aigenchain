@@ -1,9 +1,9 @@
-from src.tool_implementations import (
-    do_manage_contact,
+from runtime.tools.contacts_impl import (
     do_resolve_contact,
+    do_manage_contact,
 )
 
 __all__ = [
-    "do_manage_contact",
     "do_resolve_contact",
+    "do_manage_contact",
 ]
