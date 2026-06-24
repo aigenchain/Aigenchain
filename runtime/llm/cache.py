@@ -1,0 +1,260 @@
+import re
+import httpx
+import time
+import json
+import hashlib
+import threading
+from typing import Optional, Dict, List, Tuple
+from urllib.parse import urlparse
+def _get_cache_key(url: str, model: str, messages: List[Dict], 
+                   temperature: float, max_tokens: int) -> str:
+    """Generate cache key for LLM requests."""
+    hashable_messages = []
+    for msg in messages:
+        sorted_items = tuple(sorted(msg.items()))
+        hashable_messages.append(sorted_items)
+    
+    content = json.dumps({
+        'url': url,
+        'model': model, 
+        'messages': hashable_messages,
+        'temp': temperature,
+        'max_tokens': max_tokens
+    }, sort_keys=True)
+    return hashlib.sha256(content.encode()).hexdigest()
+
+_response_cache = {}
+
+# Dead-host cooldown: maps host (scheme://host:port) -> unix ts when cooldown expires.
+# When a connect to a host fails, we mark it dead for DEAD_HOST_COOLDOWN seconds so
+# subsequent calls fail instantly instead of waiting on the connect timeout. Keeps
+# one unreachable upstream from jamming chat across the rest of the app.
+#
+# But a SINGLE transient blip (local model briefly busy, a momentary
+# Tailscale hiccup) used to trip a full 60s lockout — the user saw a
+# 503 and thought the model died when it was fine a second later. So:
+#   - require FAIL_THRESHOLD consecutive failures before cooling
+#   - shorter cooldown so recovery is quick
+#   - any success resets the failure counter immediately
+DEAD_HOST_COOLDOWN = 20.0
+_HOST_FAIL_THRESHOLD = 2
+_dead_hosts: Dict[str, float] = {}
+_host_fails: Dict[str, int] = {}
+# Guards the two maps above. The synchronous llm_call() runs inside FastAPI's
+# threadpool (sync routes such as /sessions/auto-sort) while llm_call_async()
+# runs on the event loop, so these maps are mutated from multiple OS threads.
+# Without the lock the get()+1+set on _host_fails is a read-modify-write that
+# loses failure counts under concurrent connect errors (issue #659).
+_host_health_lock = threading.Lock()
+_model_activity: Dict[str, float] = {}
+
+_HARMONY_MARKER_RE = re.compile(
+    r"<\|channel\|>(analysis|final)"
+    r"|<\|start\|>(?:assistant|system|user|tool)?"
+    r"|<\|message\|>"
+    r"|<\|end\|>"
+    r"|<\|return\|>"
+    r"|<\|call\|>"
+)
+_HARMONY_MARKERS = (
+    "<|channel|>analysis",
+    "<|channel|>final",
+    "<|start|>assistant",
+    "<|start|>system",
+    "<|start|>user",
+    "<|start|>tool",
+    "<|start|>",
+    "<|message|>",
+    "<|end|>",
+    "<|return|>",
+    "<|call|>",
+)
+_HARMONY_MAX_MARKER_LEN = max(len(marker) for marker in _HARMONY_MARKERS)
+
+
+def _harmony_suffix_hold_len(text: str) -> int:
+    """Return how many trailing chars could be the start of a harmony marker."""
+    limit = min(len(text), _HARMONY_MAX_MARKER_LEN - 1)
+    for n in range(limit, 0, -1):
+        suffix = text[-n:]
+        if any(marker.startswith(suffix) for marker in _HARMONY_MARKERS):
+            return n
+    return 0
+
+
+class _HarmonyStreamRouter:
+    """Route OpenAI harmony analysis/final channels without leaking markers."""
+
+    def __init__(self) -> None:
+        self._buf = ""
+        self._seen_harmony = False
+        self._channel: Optional[str] = None
+        self._in_message = False
+
+    def feed(self, text: str) -> List[Tuple[str, bool]]:
+        if not text:
+            return []
+        self._buf += text
+        return self._drain(final=False)
+
+    def flush(self) -> List[Tuple[str, bool]]:
+        return self._drain(final=True)
+
+    def _append_text(self, out: List[Tuple[str, bool]], text: str) -> None:
+        if not text:
+            return
+        if not self._seen_harmony:
+            out.append((text, False))
+            return
+        if self._in_message:
+            out.append((text, self._channel == "analysis"))
+
+    def _handle_marker(self, match: re.Match[str]) -> None:
+        marker = match.group(0)
+        self._seen_harmony = True
+        if marker.startswith("<|channel|>"):
+            self._channel = match.group(1)
+            self._in_message = False
+        elif marker == "<|message|>":
+            self._in_message = True
+        else:
+            self._in_message = False
+            if marker in {"<|end|>", "<|return|>", "<|call|>"}:
+                self._channel = None
+
+    def _drain(self, *, final: bool) -> List[Tuple[str, bool]]:
+        out: List[Tuple[str, bool]] = []
+        while True:
+            match = _HARMONY_MARKER_RE.search(self._buf)
+            if not match:
+                break
+            self._append_text(out, self._buf[:match.start()])
+            self._handle_marker(match)
+            self._buf = self._buf[match.end():]
+
+        hold = 0 if final else _harmony_suffix_hold_len(self._buf)
+        emit = self._buf if hold == 0 else self._buf[:-hold]
+        self._buf = "" if hold == 0 else self._buf[-hold:]
+        self._append_text(out, emit)
+        return out
+
+
+def _stream_delta_event(text: str, *, thinking: bool = False) -> str:
+    payload = {"delta": text}
+    if thinking:
+        payload["thinking"] = True
+    return f"data: {json.dumps(payload)}\n\n"
+
+def _model_activity_key(url: str, model: str) -> str:
+    return f"{(url or '').strip()}|{(model or '').strip()}"
+
+def _same_model_identity(left: str, right: str) -> bool:
+    return (left or "").strip().lower() == (right or "").strip().lower()
+
+def note_model_activity(url: str, model: str):
+    """Record that a real upstream request used this endpoint/model."""
+    if not url or not model:
+        return
+    _model_activity[_model_activity_key(url, model)] = time.time()
+
+def seconds_since_model_activity(url: str, model: str) -> Optional[float]:
+    """Seconds since the endpoint/model was last used in this process."""
+    ts = _model_activity.get(_model_activity_key(url, model))
+    if not ts:
+        return None
+    return max(0.0, time.time() - ts)
+
+def _host_key(url: str) -> str:
+    from urllib.parse import urlsplit
+    s = urlsplit(url)
+    return f"{s.scheme}://{s.netloc}" if s.scheme and s.netloc else url
+
+def _is_host_dead(url: str) -> bool:
+    key = _host_key(url)
+    with _host_health_lock:
+        exp = _dead_hosts.get(key)
+        if exp is None:
+            return False
+        if time.time() >= exp:
+            _dead_hosts.pop(key, None)
+            return False
+        return True
+
+def _mark_host_dead(url: str) -> bool:
+    """Record a connect failure. Only actually cools the host after
+    _HOST_FAIL_THRESHOLD consecutive failures. Returns True if the host
+    is now cooled (so callers can log accurately), False if it's still
+    within its allowed-failure grace."""
+    key = _host_key(url)
+    with _host_health_lock:
+        n = _host_fails.get(key, 0) + 1
+        _host_fails[key] = n
+        if n >= _HOST_FAIL_THRESHOLD:
+            _dead_hosts[key] = time.time() + DEAD_HOST_COOLDOWN
+            return True
+        return False
+
+def _clear_host_dead(url: str) -> None:
+    key = _host_key(url)
+    with _host_health_lock:
+        _dead_hosts.pop(key, None)
+        _host_fails.pop(key, None)
+
+
+# Shared async HTTP client. Reusing one client keeps connections warm:
+# repeat calls to api.anthropic.com / api.openai.com / openrouter skip the
+# 100-500ms TCP+TLS handshake. Lazy init so we bind to the running event loop.
+_http_client: Optional[httpx.AsyncClient] = None
+_http_limits = httpx.Limits(max_connections=100, max_keepalive_connections=30, keepalive_expiry=30.0)
+
+def _get_http_client() -> httpx.AsyncClient:
+    """Return process-wide AsyncClient. Per-request timeout is passed at call time."""
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        from src.tls_overrides import llm_verify
+        _http_client = httpx.AsyncClient(
+            limits=_http_limits, http2=False, verify=llm_verify(),
+        )
+    return _http_client
+
+def _get_cached_response(cache_key: str) -> Optional[str]:
+    """Get cached response if it exists."""
+    return _response_cache.get(cache_key)
+
+def _set_cached_response(cache_key: str, response: str) -> None:
+    """Store response in cache."""
+    if len(_response_cache) > 128:
+        keys_to_remove = list(_response_cache.keys())[:64]
+        for key in keys_to_remove:
+            # pop(), not del: another thread (sync llm_call runs in FastAPI's
+            # threadpool) may have already evicted the same snapshotted key,
+            # and del would raise KeyError mid-eviction (issue #659).
+            _response_cache.pop(key, None)
+    _response_cache[cache_key] = response
+def _parse_model_cache(raw) -> List[str]:
+    if not raw:
+        return []
+    try:
+        models = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        return []
+    if not isinstance(models, list):
+        return []
+    out = []
+    seen = set()
+    for item in models:
+        mid = str(item or "").strip()
+        if not mid or mid in seen:
+            continue
+        out.append(mid)
+        seen.add(mid)
+    return out
+
+
+def _configured_cached_model_ids(
+    endpoint_url: str,
+    *,
+    owner: Optional[str] = None,
+    endpoint_id: Optional[str] = None,
+) -> List[str]:
+    """Return cached models for a configured endpoint matching endpoint_url."""

@@ -11,6 +11,14 @@ from fastapi import HTTPException
 from typing import Optional, Dict, List, Tuple
 from src.model_context import get_context_length, DEFAULT_CONTEXT
 from urllib.parse import urlparse
+from runtime.llm.cache import (
+    _get_cache_key,
+    _get_cached_response,
+    _set_cached_response,
+    _parse_model_cache,
+    _configured_cached_model_ids,
+    list_model_ids,
+)
 
 logger = logging.getLogger(__name__)
 

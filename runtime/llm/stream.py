@@ -1,0 +1,639 @@
+import asyncio
+import json
+import logging
+import httpx
+import re
+
+from fastapi import HTTPException
+from typing import Optional, Dict, List
+
+from runtime.llm.config import LLMConfig
+
+from runtime.llm.cache import (
+    _get_http_client,
+)
+
+from runtime.llm.providers import (
+    _detect_provider,
+    _provider_headers,
+)
+
+from runtime.llm.helpers import (
+    _format_upstream_error,
+    _restricts_temperature,
+    _anthropic_rejects_temperature,
+    _supports_thinking,
+)
+
+from runtime.llm.ollama import (
+    _build_ollama_payload,
+)
+
+from runtime.llm.anthropic import (
+    _build_anthropic_payload,
+)
+
+from runtime.llm.chatgpt import (
+    _build_chatgpt_responses_payload,
+)
+
+logger = logging.getLogger(__name__)
+async def stream_llm(url: str, model: str, messages: List[Dict], temperature: float = LLMConfig.DEFAULT_TEMPERATURE,
+                     max_tokens: int = LLMConfig.DEFAULT_MAX_TOKENS, headers: Optional[Dict] = None,
+                     timeout: int = LLMConfig.STREAM_TIMEOUT, prompt_type: Optional[str] = None,
+                     tools: Optional[List[Dict]] = None, session_id: Optional[str] = None):
+    """Stream LLM responses with improved error handling.
+
+    Yields SSE chunks:
+      - data: {"delta": "text"}           — text content
+      - data: {"type": "tool_calls", ...}  — accumulated native tool calls (before DONE)
+      - event: error                       — errors
+      - data: [DONE]                       — end of stream
+    """
+    provider = _detect_provider(url)
+    messages_copy = _sanitize_llm_messages(messages)
+
+    # Consolidate multiple system messages into one at the start.
+    # Some models (e.g. Qwen3.5) reject system messages that aren't first.
+    sys_parts = []
+    non_sys = []
+    for m in messages_copy:
+        if m.get("role") == "system":
+            sys_parts.append(m.get('content') or '')
+        else:
+            non_sys.append(m)
+    if sys_parts:
+        messages_copy = [{"role": "system", "content": "\n\n".join(sys_parts)}] + non_sys
+    else:
+        messages_copy = non_sys
+
+    if provider == "anthropic":
+        target_url = _normalize_anthropic_url(url)
+        h = _build_anthropic_headers(headers)
+        payload = _build_anthropic_payload(model, messages_copy, temperature, max_tokens, stream=True, tools=tools)
+    elif provider == "ollama":
+        target_url = _normalize_ollama_url(url)
+        h = {"Content-Type": "application/json"}
+        if headers:
+            h.update(headers)
+        payload = _build_ollama_payload(
+            model, messages_copy, temperature, max_tokens,
+            stream=True, tools=tools, num_ctx=get_context_length(url, model),
+        )
+    elif provider == "chatgpt-subscription":
+        target_url = _normalize_chatgpt_subscription_url(url)
+        h = _provider_headers(provider, headers)
+        payload = _build_chatgpt_responses_payload(model, messages_copy, temperature, max_tokens, stream=True)
+    else:
+        target_url = url
+        payload = {
+            "model": model,
+            "messages": messages_copy,
+            "temperature": temperature,
+            "stream": True,
+        }
+        if _restricts_temperature(model):
+            payload.pop("temperature", None)
+        if provider not in {"openrouter", "groq"}:
+            payload["stream_options"] = {"include_usage": True}
+        if max_tokens and max_tokens > 0:
+            tok_key = "max_completion_tokens" if _uses_max_completion_tokens(model) else "max_tokens"
+            payload[tok_key] = max_tokens
+        if tools:
+            payload["tools"] = tools
+        # For Ollama's OpenAI-compat /v1 endpoint with thinking models (qwen3,
+        # gemma4, etc.), suppress thinking so tool calls aren't swallowed inside
+        # <think> blocks. Ollama /v1 accepts "think": false as a top-level param.
+        if _is_ollama_openai_compat_url(url) and _supports_thinking(model):
+            payload["think"] = False
+        _apply_local_cache_affinity(payload, url, session_id)
+        h = _provider_headers(provider, headers)
+        if provider == "copilot":
+            from src.copilot import apply_request_headers
+            apply_request_headers(h, messages_copy)
+
+    # Short connect timeout: a reachable peer answers SYN in <100ms even on
+    # Tailscale. 3s is plenty; 30s let one dead upstream wedge the UI.
+    stream_timeout = httpx.Timeout(connect=3.0, read=float(timeout), write=30.0, pool=5.0)
+
+    if _is_host_dead(target_url):
+        yield f'event: error\ndata: {json.dumps({"error": f"Upstream {_host_key(target_url)} unreachable (cooldown active)", "status": 503})}\n\n'
+        return
+    note_model_activity(target_url, model)
+
+    # ── ChatGPT Subscription / Codex Responses streaming ──
+    if provider == "chatgpt-subscription":
+        event_name = ""
+        input_tokens = 0
+        output_tokens = 0
+        try:
+            client = _get_http_client()
+            async with client.stream('POST', target_url, json=payload, headers=h, timeout=stream_timeout) as r:
+                _clear_host_dead(target_url)
+                if r.status_code != 200:
+                    raw = (await r.aread()).decode(errors="replace")
+                    friendly = _format_chatgpt_subscription_error(r.status_code, raw)
+                    yield f'event: error\ndata: {json.dumps({"status": r.status_code, "text": friendly, "raw": raw[:500]})}\n\n'
+                    return
+                async for line in r.aiter_lines():
+                    if not line:
+                        continue
+                    if line.startswith("event:"):
+                        event_name = line[6:].strip()
+                        continue
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[5:].strip()
+                    if not raw:
+                        continue
+                    try:
+                        data = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                    evt = data.get("type") or event_name
+                    if evt == "response.output_text.delta":
+                        delta = data.get("delta") or ""
+                        if delta:
+                            yield f'data: {json.dumps({"delta": delta})}\n\n'
+                    elif evt == "response.completed":
+                        usage = (data.get("response") or {}).get("usage") or data.get("usage") or {}
+                        input_tokens = usage.get("input_tokens") or usage.get("prompt_tokens") or input_tokens
+                        output_tokens = usage.get("output_tokens") or usage.get("completion_tokens") or output_tokens
+                        if input_tokens or output_tokens:
+                            yield f'data: {json.dumps({"type": "usage", "data": {"input_tokens": input_tokens, "output_tokens": output_tokens}})}\n\n'
+                        yield "data: [DONE]\n\n"
+                        return
+                    elif evt in ("response.failed", "error"):
+                        err = data.get("error") or (data.get("response") or {}).get("error") or {}
+                        text = err.get("message") if isinstance(err, dict) else str(err or "ChatGPT Subscription request failed")
+                        yield f'event: error\ndata: {json.dumps({"status": 502, "text": text})}\n\n'
+                        return
+                yield "data: [DONE]\n\n"
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            _cooled = _mark_host_dead(target_url)
+            _tail = f" — host cooled for {DEAD_HOST_COOLDOWN:.0f}s" if _cooled else " — transient, will retry"
+            logger.warning(f"ChatGPT Subscription stream connect to {target_url} failed: {e}{_tail}")
+            yield f'event: error\ndata: {json.dumps({"error": f"Cannot reach {_host_key(target_url)}", "status": 503})}\n\n'
+        except httpx.ReadTimeout:
+            yield f'event: error\ndata: {json.dumps({"error": "Read timeout", "status": 504})}\n\n'
+        except httpx.NetworkError:
+            yield f'event: error\ndata: {json.dumps({"error": "Network error", "status": 502})}\n\n'
+        except Exception as e:
+            logger.error(f"ChatGPT Subscription stream error: {e}")
+            yield f'event: error\ndata: {json.dumps({"error": str(e), "status": 502})}\n\n'
+        return
+
+    # ── Native Ollama streaming ──
+    if provider == "ollama":
+        _ollama_tool_calls: List[Dict] = []
+        _harmony_router = _HarmonyStreamRouter()
+        try:
+            client = _get_http_client()
+            async with client.stream('POST', target_url, json=payload, headers=h, timeout=stream_timeout) as r:
+                _clear_host_dead(target_url)
+                if r.status_code != 200:
+                    raw = (await r.aread()).decode(errors="replace")
+                    friendly = _format_upstream_error(r.status_code, raw, target_url)
+                    yield f'event: error\ndata: {json.dumps({"status": r.status_code, "text": friendly, "raw": raw[:500]})}\n\n'
+                    return
+                async for line in r.aiter_lines():
+                    if not line:
+                        continue
+                    try:
+                        j = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    message = j.get("message") or {}
+                    thinking = message.get("thinking") or ""
+                    if thinking:
+                        yield _stream_delta_event(thinking, thinking=True)
+                    content = message.get("content") or ""
+                    if content:
+                        for part, is_thinking in _harmony_router.feed(content):
+                            yield _stream_delta_event(part, thinking=is_thinking)
+                    for tc in message.get("tool_calls") or []:
+                        fn = tc.get("function") or {}
+                        if fn.get("name"):
+                            _ollama_tool_calls.append({
+                                "id": tc.get("id") or f"call_{len(_ollama_tool_calls)}",
+                                "name": fn.get("name") or "",
+                                "arguments": json.dumps(fn.get("arguments") or {}),
+                            })
+                    if j.get("done"):
+                        for part, is_thinking in _harmony_router.flush():
+                            yield _stream_delta_event(part, thinking=is_thinking)
+                        if _ollama_tool_calls:
+                            yield f'data: {json.dumps({"type": "tool_calls", "calls": _ollama_tool_calls})}\n\n'
+                        if j.get("prompt_eval_count") is not None or j.get("eval_count") is not None:
+                            yield f'data: {json.dumps({"type": "usage", "data": {"input_tokens": j.get("prompt_eval_count", 0), "output_tokens": j.get("eval_count", 0)}})}\n\n'
+                        yield "data: [DONE]\n\n"
+                        return
+                for part, is_thinking in _harmony_router.flush():
+                    yield _stream_delta_event(part, thinking=is_thinking)
+                yield "data: [DONE]\n\n"
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            _cooled = _mark_host_dead(target_url)
+            _tail = f" — host cooled for {DEAD_HOST_COOLDOWN:.0f}s" if _cooled else " — transient, will retry"
+            logger.warning(f"Ollama stream connect to {target_url} failed: {e}{_tail}")
+            yield f'event: error\ndata: {json.dumps({"error": f"Cannot reach {_host_key(target_url)}", "status": 503})}\n\n'
+        except httpx.ReadTimeout:
+            yield f'event: error\ndata: {json.dumps({"error": "Read timeout", "status": 504})}\n\n'
+        except httpx.NetworkError:
+            yield f'event: error\ndata: {json.dumps({"error": "Network error", "status": 502})}\n\n'
+        except Exception as e:
+            logger.error(f"Ollama stream error: {e}")
+            yield f'event: error\ndata: {json.dumps({"error": str(e), "status": 502})}\n\n'
+        return
+
+    # ── Anthropic streaming ──
+    if provider == "anthropic":
+        _anth_input_tokens = 0
+        _anth_output_tokens = 0
+        # Track tool_use blocks: {index: {id, name, arguments_json}}
+        _anth_tool_blocks: Dict[int, Dict] = {}
+        _anth_block_idx = -1
+        _anth_block_type = ""
+        try:
+            client = _get_http_client()
+            async with client.stream('POST', target_url, json=payload, headers=h, timeout=stream_timeout) as r:
+                _clear_host_dead(target_url)
+                if r.status_code != 200:
+                    raw = (await r.aread()).decode(errors="replace")
+                    friendly = _format_upstream_error(r.status_code, raw, target_url)
+                    yield f'event: error\ndata: {json.dumps({"status": r.status_code, "text": friendly, "raw": raw[:500]})}\n\n'
+                    return
+                async for line in r.aiter_lines():
+                    # SSE allows "data:value" with no space after the colon
+                    # (the space is optional per the spec). Some gateways and
+                    # local servers omit it; gating on "data: " dropped their
+                    # entire stream.
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if not data or not data.startswith("{"):
+                        continue
+                    try:
+                        j = json.loads(data)
+                        evt = j.get("type", "")
+                        if evt == "content_block_start":
+                            _anth_block_idx = j.get("index", _anth_block_idx + 1)
+                            cb = j.get("content_block") or {}
+                            _anth_block_type = cb.get("type", "text")
+                            if _anth_block_type == "tool_use":
+                                _anth_tool_blocks[_anth_block_idx] = {
+                                    "id": cb.get("id") or f"call_{_anth_block_idx}",
+                                    "name": cb.get("name") or "",
+                                    "arguments": "",
+                                }
+                        elif evt == "content_block_delta":
+                            delta = j.get("delta") or {}
+                            delta_type = delta.get("type", "")
+                            if delta_type == "text_delta":
+                                text = delta.get("text") or ""
+                                if text:
+                                    yield f'data: {json.dumps({"delta": text})}\n\n'
+                            elif delta_type == "input_json_delta":
+                                # Accumulate tool arguments JSON
+                                idx = j.get("index", _anth_block_idx)
+                                if idx in _anth_tool_blocks:
+                                    partial = delta.get("partial_json") or ""
+                                    _anth_tool_blocks[idx]["arguments"] += partial
+                                    # Stream tool arg deltas for doc tools
+                                    if partial and _anth_tool_blocks[idx].get("name") in ("create_document", "update_document", "edit_document"):
+                                        yield f'data: {json.dumps({"type": "tool_call_delta", "index": idx, "name": _anth_tool_blocks[idx]["name"], "arg_delta": partial})}\n\n'
+                        elif evt == "message_start":
+                            _u = j.get("message", {}).get("usage", {})
+                            _anth_input_tokens = _u.get("input_tokens", 0)
+                            # Surface prompt-cache effectiveness: cache_read > 0 means the
+                            # stable system+tools prefix was served from cache this round.
+                            _c_read = _u.get("cache_read_input_tokens", 0)
+                            _c_write = _u.get("cache_creation_input_tokens", 0)
+                            if _c_read or _c_write:
+                                logger.info(
+                                    "[anthropic-cache] read=%s write=%s fresh_input=%s",
+                                    _c_read, _c_write, _anth_input_tokens,
+                                )
+                        elif evt == "message_delta":
+                            _anth_output_tokens = j.get("usage", {}).get("output_tokens", 0)
+                        elif evt == "message_stop":
+                            # Emit accumulated tool calls in OpenAI-compatible format
+                            if _anth_tool_blocks:
+                                calls = []
+                                for idx in sorted(_anth_tool_blocks):
+                                    tb = _anth_tool_blocks[idx]
+                                    calls.append({
+                                        "id": tb["id"],
+                                        "name": tb["name"],
+                                        "arguments": tb["arguments"],
+                                    })
+                                yield f'data: {json.dumps({"type": "tool_calls", "calls": calls})}\n\n'
+                            if _anth_input_tokens or _anth_output_tokens:
+                                yield f'data: {json.dumps({"type": "usage", "data": {"input_tokens": _anth_input_tokens, "output_tokens": _anth_output_tokens}})}\n\n'
+                            yield "data: [DONE]\n\n"
+                            return
+                        elif evt == "error":
+                            err_msg = j.get("error", {}).get("message", "Unknown error")
+                            yield f'event: error\ndata: {json.dumps({"error": err_msg, "status": 400})}\n\n'
+                            return
+                    except json.JSONDecodeError:
+                        continue
+                yield "data: [DONE]\n\n"
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            _cooled = _mark_host_dead(target_url)
+            _tail = f" — host cooled for {DEAD_HOST_COOLDOWN:.0f}s" if _cooled else " — transient, will retry"
+            logger.warning(f"Anthropic stream connect to {target_url} failed: {e}{_tail}")
+            yield f'event: error\ndata: {json.dumps({"error": f"Cannot reach {_host_key(target_url)}", "status": 503})}\n\n'
+        except httpx.ReadTimeout:
+            yield f'event: error\ndata: {json.dumps({"error": "Read timeout", "status": 504})}\n\n'
+        except httpx.NetworkError:
+            yield f'event: error\ndata: {json.dumps({"error": "Network error", "status": 502})}\n\n'
+        except Exception as e:
+            logger.error(f"Anthropic stream error: {e}")
+            yield f'event: error\ndata: {json.dumps({"error": str(e), "status": 502})}\n\n'
+        return
+
+    # ── OpenAI-compatible streaming ──
+    # Accumulate native tool_calls across streaming chunks
+    _tc_acc: Dict[int, Dict] = {}  # index -> {id, name, arguments}
+    _tc_last_idx = [-1]  # most-recently-touched slot, for providers that omit `index`
+    # For thinking models: prepend <think> to first content delta so frontend
+    # can detect thinking-in-progress (some models output </think> but no <think>)
+    _thinking_model = _supports_thinking(model)
+    _first_content_sent = False
+    _in_think_tag = False        # True while consuming <think>…</think> content
+    _think_open_stripped = False  # opening <think> tag already removed
+    _harmony_router = _HarmonyStreamRouter()
+    _harmony_active = False       # sticky: gpt-oss harmony <|channel|> stream detected
+    _actual_model = ""
+    _actual_model_announced = False
+
+    def _emit_tool_calls():
+        """Build the tool_calls event string if any were accumulated."""
+        if not _tc_acc:
+            return None
+        calls = [_tc_acc[i] for i in sorted(_tc_acc)]
+        return f'data: {json.dumps({"type": "tool_calls", "calls": calls})}\n\n'
+
+    def _format_routed_content(parts: List[Tuple[str, bool]]) -> List[str]:
+        nonlocal _first_content_sent
+        events = []
+        for part, is_thinking in parts:
+            if is_thinking:
+                events.append(_stream_delta_event(part, thinking=True))
+                continue
+            # Some thinking backends start normal content with a stray closing
+            # tag. Repair only that shape; do not wrap every first token for
+            # model families like MiniMax, which often stream ordinary answers.
+            if _thinking_model and not _first_content_sent and part.lstrip().lower().startswith("</think"):
+                part = "<think>" + part
+            _first_content_sent = True
+            events.append(_stream_delta_event(part))
+        return events
+
+    try:
+        client = _get_http_client()
+        async with client.stream('POST', target_url, json=payload, headers=h, timeout=stream_timeout) as r:
+            _clear_host_dead(target_url)
+            if r.status_code != 200:
+                raw = (await r.aread()).decode(errors="replace")
+                friendly = _format_upstream_error(r.status_code, raw, target_url)
+                yield f'event: error\ndata: {json.dumps({"status": r.status_code, "text": friendly, "raw": raw[:500]})}\n\n'
+                return
+
+            async for line in r.aiter_lines():
+                if not line:
+                    continue
+
+                # SSE allows "data:value" with no space after the colon; gating
+                # on "data: " silently dropped content + usage from providers
+                # that omit it.
+                if line.startswith("data:"):
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        for event in _format_routed_content(_harmony_router.flush()):
+                            yield event
+                        tc_event = _emit_tool_calls()
+                        if tc_event:
+                            yield tc_event
+                        yield "data: [DONE]\n\n"
+                        return
+
+                    try:
+                        if data.strip():
+                            if data.startswith("{"):
+                                j = json.loads(data)
+                                chunk_model = j.get("model")
+                                if isinstance(chunk_model, str) and chunk_model.strip():
+                                    _actual_model = chunk_model.strip()
+                                    if (
+                                        not _actual_model_announced
+                                        and not _same_model_identity(_actual_model, model)
+                                    ):
+                                        _actual_model_announced = True
+                                        yield f'data: {json.dumps({"type": "model_actual", "requested_model": model, "model": _actual_model})}\n\n'
+                                # Usage chunk (from stream_options)
+                                _choices = j.get("choices") or []
+                                _delta0 = _choices[0].get("delta") if (_choices and _choices[0] is not None) else None
+                                # Capture usage whenever the chunk carries it and
+                                # the delta has no actual output. Some gateways /
+                                # local servers attach usage to the FINAL delta,
+                                # which also carries role/finish_reason (so it is
+                                # not exactly None/{}/{"content": None}); gating on
+                                # those exact shapes discarded their token counts.
+                                _delta_has_output = isinstance(_delta0, dict) and (
+                                    _delta0.get("content")
+                                    or _delta0.get("reasoning_content")
+                                    or _delta0.get("reasoning")
+                                    or _delta0.get("thinking")
+                                    or _delta0.get("tool_calls")
+                                )
+                                if "usage" in j and not _delta_has_output:
+                                    u = j["usage"] or {}
+                                    _usage_data = {"input_tokens": u.get("prompt_tokens", 0), "output_tokens": u.get("completion_tokens", 0)}
+                                    # llama.cpp puts a `timings` block alongside `usage` with the
+                                    # TRUE generation speed (predicted_per_second) — pure decode,
+                                    # excluding prefill/network. Pass it through so the UI shows the
+                                    # real gen t/s instead of recomputing tokens/wall-clock (which
+                                    # includes prefill and reads ~20-40% low). Prefill speed too.
+                                    _tm = j.get("timings")
+                                    if isinstance(_tm, dict):
+                                        if _tm.get("predicted_per_second"):
+                                            _usage_data["gen_tps"] = round(_tm["predicted_per_second"], 2)
+                                        if _tm.get("prompt_per_second"):
+                                            _usage_data["prefill_tps"] = round(_tm["prompt_per_second"], 2)
+                                    if _actual_model:
+                                        _usage_data["model"] = _actual_model
+                                        if not _same_model_identity(_actual_model, model):
+                                            _usage_data["requested_model"] = model
+                                    yield f'data: {json.dumps({"type": "usage", "data": _usage_data})}\n\n'
+                                elif "choices" in j:
+                                    _c0 = (j["choices"] or [None])[0]
+                                    if _c0 is None:
+                                        continue
+                                    delta = _c0.get("delta") or {}
+                                    if isinstance(delta, dict):
+                                        # Text content
+                                        # Reasoning tokens (VLLM --reasoning-parser, e.g. Qwen3/DeepSeek-R1, Nemotron). vLLM 0.20.2 / NIM emit the field as `reasoning`; older builds use `reasoning_content`. Some OpenAI-compatible Ollama builds use `thinking`.
+                                        reasoning = delta.get("reasoning_content") or delta.get("reasoning") or delta.get("thinking") or ""
+                                        if reasoning:
+                                            yield _stream_delta_event(reasoning, thinking=True)
+                                        content = delta.get("content") or ""
+                                        if content:
+                                            stripped = content.lstrip()
+                                            # gpt-oss harmony format (<|channel|>analysis/final): route via the harmony
+                                            # stream router. Sticky once the first marker appears — distinct from the
+                                            # <think> path below (handled in the else, preserving #2588 behaviour).
+                                            if _harmony_active or "<|" in content:
+                                                _harmony_active = True
+                                                for event in _format_routed_content(_harmony_router.feed(content)):
+                                                    yield event
+                                            else:
+                                                # Auto-detect <think>…</think> in content stream.
+                                                # Covers Qwen3-derived models (Qwopus, QwQ forks) whose
+                                                # names don't match _THINKING_MODEL_PATTERNS but still
+                                                # emit literal <think> markup via llama.cpp --jinja.
+                                                if not _first_content_sent and not _thinking_model and not _in_think_tag and stripped.lower().startswith("<think"):
+                                                    _thinking_model = True
+                                                    _in_think_tag = True
+                                                if _in_think_tag:
+                                                    close_idx = content.lower().find("</think>")
+                                                    if close_idx != -1:
+                                                        # Split: up-to-</think> → thinking, remainder → content
+                                                        think_part = content[:close_idx]
+                                                        if not _think_open_stripped:
+                                                            # Strip the opening <think[...] > from the first chunk.
+                                                            # Use a dedicated flag — _first_content_sent stays False
+                                                            # throughout the think block, so it must not be reused.
+                                                            tag_end = think_part.lower().find(">")
+                                                            if tag_end != -1:
+                                                                think_part = think_part[tag_end + 1:]
+                                                            _think_open_stripped = True
+                                                        regular_part = content[close_idx + len("</think>"):]
+                                                        _in_think_tag = False
+                                                        if think_part:
+                                                            yield f'data: {json.dumps({"delta": think_part, "thinking": True})}\n\n'
+                                                        if regular_part:
+                                                            _first_content_sent = True
+                                                            yield f'data: {json.dumps({"delta": regular_part})}\n\n'
+                                                    else:
+                                                        # Still inside <think>: route to thinking channel
+                                                        if not _think_open_stripped:
+                                                            # Strip the opening <think[...] > tag (first chunk only)
+                                                            tag_end = stripped.lower().find(">")
+                                                            if tag_end != -1:
+                                                                content = stripped[tag_end + 1:]
+                                                            _think_open_stripped = True
+                                                        if content:
+                                                            yield f'data: {json.dumps({"delta": content, "thinking": True})}\n\n'
+                                                else:
+                                                    # Some thinking backends start normal content with a
+                                                    # stray closing tag. Repair only that shape; do not
+                                                    # wrap every first token for model families like
+                                                    # MiniMax, which often stream ordinary answers.
+                                                    if _thinking_model and not _first_content_sent and stripped.lower().startswith("</think"):
+                                                        content = "<think>" + content
+                                                    _first_content_sent = True
+                                                    yield f'data: {json.dumps({"delta": content})}\n\n'
+                                        # Native tool calls — accumulate across chunks
+                                        for tc in delta.get("tool_calls") or []:
+                                            if tc is None:
+                                                continue
+                                            func = tc.get("function") or {}
+                                            raw_idx = tc.get("index")
+                                            if raw_idx is None:
+                                                # Gemini's OpenAI-compat layer omits `index` on
+                                                # parallel tool calls (every delta arrives as
+                                                # index=None) and sends each call complete in one
+                                                # delta. Without this, all parallel calls collide
+                                                # into slot 0 — later calls overwrite the first's
+                                                # name and CORRUPT its arguments by concatenation,
+                                                # so only one malformed call survives and the
+                                                # follow-up round 400s. A function name marks the
+                                                # start of a new call → allocate a fresh slot;
+                                                # an arg-only continuation attaches to the last.
+                                                if func.get("name") or _tc_last_idx[0] < 0:
+                                                    # Next free slot ABOVE any existing key (not
+                                                    # len()), so a provider mixing integer indices
+                                                    # with index=None can never collide.
+                                                    idx = max(_tc_acc, default=-1) + 1
+                                                else:
+                                                    idx = _tc_last_idx[0]
+                                            else:
+                                                idx = raw_idx
+                                            _tc_last_idx[0] = idx
+                                            if idx not in _tc_acc:
+                                                _tc_acc[idx] = {"id": "", "name": "", "arguments": ""}
+                                            if tc.get("id"):
+                                                _tc_acc[idx]["id"] = tc["id"]
+                                            # Gemini 3 returns an opaque thought_signature in
+                                            # extra_content on the function-call delta. It MUST be
+                                            # echoed back on the assistant tool_call next round or the
+                                            # follow-up request 400s ("Function call is missing a
+                                            # thought_signature"). Preserve it verbatim; other
+                                            # providers never send it, so this is a no-op for them.
+                                            if tc.get("extra_content"):
+                                                _tc_acc[idx]["extra_content"] = tc["extra_content"]
+                                            if func.get("name"):
+                                                _tc_acc[idx]["name"] = func["name"]
+                                            if "arguments" in func:
+                                                # Guard against a null arguments delta: `func` can be
+                                                # {"arguments": None} (JSON null), and a raw `+= None`
+                                                # raises TypeError that the broad except swallows,
+                                                # silently dropping the rest of the chunk. Matches the
+                                                # Anthropic accumulator (`partial = ... or ""`) above.
+                                                _tc_acc[idx]["arguments"] += func["arguments"] or ""
+                                                # Stream tool arg deltas for doc tools
+                                                if func["arguments"] and _tc_acc[idx].get("name") in ("create_document", "update_document", "edit_document"):
+                                                    yield f'data: {json.dumps({"type": "tool_call_delta", "index": idx, "name": _tc_acc[idx]["name"], "arg_delta": func["arguments"]})}\n\n'
+                                elif "text" in j:
+                                    if j["text"]:
+                                        for event in _format_routed_content(_harmony_router.feed(j["text"])):
+                                            yield event
+                            else:
+                                if data.strip():
+                                    for event in _format_routed_content(_harmony_router.feed(data)):
+                                        yield event
+                    except Exception as e:
+                        logger.error(f"Error parsing stream data: {e}")
+                        continue
+
+            # End of stream (no explicit [DONE] received)
+            for event in _format_routed_content(_harmony_router.flush()):
+                yield event
+            tc_event = _emit_tool_calls()
+            if tc_event:
+                yield tc_event
+            yield "data: [DONE]\n\n"
+
+    except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+        _cooled = _mark_host_dead(target_url)
+        _tail = f" — host cooled for {DEAD_HOST_COOLDOWN:.0f}s" if _cooled else " — transient, will retry"
+        logger.warning(f"Stream connect to {target_url} failed: {e}{_tail}")
+        yield f'event: error\ndata: {json.dumps({"error": f"Cannot reach {_host_key(target_url)}", "status": 503})}\n\n'
+    except httpx.ReadTimeout:
+        yield f'event: error\ndata: {json.dumps({"error": "Read timeout", "status": 504})}\n\n'
+    except httpx.NetworkError:
+        yield f'event: error\ndata: {json.dumps({"error": "Network error", "status": 502})}\n\n'
+    except Exception as e:
+        logger.error(f"Stream error: {e}")
+        yield f'event: error\ndata: {json.dumps({"error": str(e), "status": 502})}\n\n'
+
+
+def _summarize_stream_error(err_chunk: Optional[str]) -> str:
+    """Pull a short human reason out of an `event: error` SSE chunk for the
+    fallback notice. Returns a generic message if it can't be parsed."""
+    if not err_chunk:
+        return "primary model failed"
+    try:
+        for line in err_chunk.split("\n"):
+            if line.startswith("data: "):
+                j = json.loads(line[6:])
+                txt = j.get("text") or j.get("error") or ""
+                status = j.get("status")
+                msg = (f"HTTP {status}: " if status else "") + str(txt)
+                return msg[:200].strip() or "primary model failed"
+    except Exception:
+        pass
+    return "primary model failed"
+
+

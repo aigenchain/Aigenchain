@@ -1,0 +1,16 @@
+from __future__ import annotations
+
+# Provider Layer
+#
+# pindahkan fungsi berikut dari src/llm_core.py:
+#
+# _host_match
+# _detect_provider
+# _is_self_hosted_openai_compatible
+# _provider_headers
+# _provider_label
+# _normalize_chatgpt_subscription_url
+# _uses_max_completion_tokens
+# _restricts_temperature
+# _anthropic_rejects_temperature
+# _supports_thinking

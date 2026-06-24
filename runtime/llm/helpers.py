@@ -1,0 +1,165 @@
+import json
+from typing import Optional, Dict, List
+def _message_content_as_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if not isinstance(part, dict):
+                if part:
+                    parts.append(str(part))
+                continue
+            if isinstance(part.get("text"), str):
+                parts.append(part["text"])
+                continue
+            if isinstance(part.get("content"), str):
+                parts.append(part["content"])
+        return "\n".join(parts)
+    return "" if content is None else str(content)
+
+
+def _chatgpt_subscription_instructions(messages: List[Dict]) -> str:
+    instructions = [
+        _message_content_as_text(msg.get("content")).strip()
+        for msg in messages or []
+        if (msg.get("role") or "") == "system"
+    ]
+    instructions = [part for part in instructions if part]
+    if instructions:
+        return "\n\n".join(instructions)
+    return "You are a helpful AI assistant."
+
+
+def _build_chatgpt_responses_payload(
+    model: str,
+    messages: List[Dict],
+    temperature: float,
+    max_tokens: int,
+    *,
+    stream: bool = False,
+) -> Dict:
+    from src.chatgpt_subscription import build_responses_input
+
+    conversation = [msg for msg in (messages or []) if (msg.get("role") or "") != "system"]
+    payload: Dict = {
+        "model": model,
+        "instructions": _chatgpt_subscription_instructions(messages),
+        "input": build_responses_input(conversation),
+        "stream": stream,
+        "store": False,
+    }
+    if not _restricts_temperature(model):
+        payload["temperature"] = temperature
+    # ChatGPT Subscription Codex API does not support max_output_tokens —
+    # passing it returns HTTP 400 "Unsupported parameter: max_output_tokens".
+    # Do not include it in the payload.
+    return payload
+
+
+def _format_chatgpt_subscription_error(status_code: int, text: str) -> str:
+    if status_code in (401, 403):
+        return "ChatGPT Subscription credentials expired or were rejected. Reconnect the provider."
+    if status_code == 429:
+        return "ChatGPT Subscription quota or rate limit was reached. Retry after the upstream limit resets."
+    return _format_upstream_error(status_code, text, "https://chatgpt.com/backend-api/codex")
+
+
+def _format_upstream_error(status: int, body: bytes | str, url: str) -> str:
+    """Turn an upstream HTTP error into a user-readable sentence.
+
+    Auth failures (401/403) become 'xAI rejected the API key' etc., so the UI
+    stops showing raw JSON like '{"error":{"message":"User not found."}}'.
+    """
+    if isinstance(body, bytes):
+        try:
+            body = body.decode("utf-8", errors="replace")
+        except Exception:
+            body = str(body)
+    provider = _provider_label(url)
+    # Try to pull a message out of the body
+    detail = ""
+    try:
+        j = json.loads(body) if body else {}
+        if isinstance(j, dict):
+            err = j.get("error") or j
+            if isinstance(err, dict):
+                detail = (err.get("message") or err.get("detail") or "").strip()
+            elif isinstance(err, str):
+                detail = err.strip()
+    except Exception:
+        detail = (body or "").strip()[:240]
+
+    if status in (401, 403):
+        msg = f"{provider} rejected the API key"
+        if status == 403:
+            msg = f"{provider} denied access (403)"
+        if detail:
+            msg += f" — {detail}"
+        msg += ". Check Model Endpoints → {} and re-paste the key.".format(provider)
+        return msg
+    if status == 404:
+        return f"{provider} returned 404 — check the base URL and model name." + (f" ({detail})" if detail else "")
+    if status == 429:
+        return f"{provider} rate-limited the request (429)." + (f" {detail}" if detail else "")
+    if status >= 500:
+        return f"{provider} is having an outage (HTTP {status})." + (f" {detail}" if detail else "")
+    return f"{provider} returned HTTP {status}" + (f": {detail}" if detail else "")
+
+# Models that require max_completion_tokens instead of max_tokens
+_MAX_COMPLETION_TOKENS_MODELS = {"o1", "o3", "o4", "gpt-4.5", "gpt-5"}
+
+def _uses_max_completion_tokens(model: str) -> bool:
+    """Check if a model requires max_completion_tokens instead of max_tokens."""
+    if not model:
+        return False
+    m = model.lower()
+    return any(m.startswith(p) or f"/{p}" in m for p in _MAX_COMPLETION_TOKENS_MODELS)
+
+# OpenAI reasoning models (o1, o3, o4, gpt-5 families) only accept the default
+# temperature. Sending any explicit value — even 0.0 — returns HTTP 400
+# ("Only the default (1) value is supported"). That otherwise breaks chat when a
+# preset sets a non-default temperature, and makes endpoint probing report a
+# perfectly good model as failing. For these models we omit the field and let
+# the API use its required default. (gpt-4.5 is intentionally excluded — it is
+# not a reasoning model and accepts temperature normally.)
+_FIXED_TEMPERATURE_MODELS = ("o1", "o3", "o4", "gpt-5")
+
+def _restricts_temperature(model: str) -> bool:
+    """Check if a model rejects any non-default temperature."""
+    if not model:
+        return False
+    m = model.lower()
+    return any(m.startswith(p) or f"/{p}" in m for p in _FIXED_TEMPERATURE_MODELS)
+
+# Anthropic removed the sampling parameters (temperature, top_p, top_k) starting
+# with Claude Opus 4.7. On Opus 4.7 and later, sending `temperature` at all —
+# even 0.0 — returns HTTP 400. Earlier Claude models (Opus 4.6 and below, every
+# Sonnet/Haiku) still accept temperature in [0.0, 1.0], so the omission must be
+# version-gated rather than applied to all `claude-*` models.
+def _anthropic_rejects_temperature(model: str) -> bool:
+    """Check if a native-Anthropic model rejects the temperature field (Opus 4.7+)."""
+    if not isinstance(model, str) or not model:
+        return False
+    # `(?<![a-z])` anchors "opus" to a word boundary so a substring match like
+    # `oct-opus`/`octopus-4-8` can't be read as Opus (it would otherwise strip
+    # temperature). Cap the minor at 1-2 digits and forbid a trailing digit so a
+    # dated id like `claude-opus-4-20250514` (Opus 4.0) parses as major-only (no
+    # minor match, kept) instead of reading the date `20250514` as a giant minor
+    # that would falsely test >= 4.7. Dated 4.7+ snapshots (`claude-opus-4-7-
+    # 20260201`) keep their explicit minor and are still matched.
+    match = re.search(r"(?<![a-z])opus[-_]?(\d+)[-_.](\d{1,2})(?!\d)", model.lower())
+    if not match:
+        return False
+    return (int(match.group(1)), int(match.group(2))) >= (4, 7)
+
+# Models that support structured thinking — may output </think> without opening tag
+_THINKING_MODEL_PATTERNS = ("qwen3", "qwq", "deepseek-r1", "deepseek-reasoner", "minimax", "m2-reap", "gemma")
+
+def _supports_thinking(model: str) -> bool:
+    """Check if model supports structured thinking output."""
+    if not model:
+        return False
+    m = model.lower()
+    return any(p in m for p in _THINKING_MODEL_PATTERNS)
+
