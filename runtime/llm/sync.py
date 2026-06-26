@@ -30,6 +30,7 @@ from runtime.llm.chatgpt import (
 )
 from runtime.llm.helpers import (
     _as_content_blocks,
+    _sanitize_llm_messages,
 )
 logger = logging.getLogger(__name__)
 def llm_call(url: str, model: str, messages: List[Dict], temperature: float = LLMConfig.DEFAULT_TEMPERATURE,
