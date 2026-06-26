@@ -162,3 +162,11 @@ def _parse_anthropic_response(data: dict) -> str:
     )
 
 
+def _normalize_anthropic_url(url: str) -> str:
+    """Ensure Anthropic URL points to /v1/messages."""
+    url = url.rstrip("/")
+    if url.endswith("/v1/messages"):
+        return url
+    if url.endswith("/v1"):
+        return url + "/messages"
+    return url + "/v1/messages"

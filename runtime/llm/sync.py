@@ -4,11 +4,13 @@ import logging
 from fastapi import HTTPException
 from typing import Optional, Dict, List
 from runtime.llm.config import LLMConfig
+from src.model_context import get_context_length
 
 from runtime.llm.cache import (
     _get_cache_key,
     _get_cached_response,
     _set_cached_response,
+    note_model_activity,
 )
 
 from runtime.llm.providers import (
@@ -23,6 +25,7 @@ from runtime.llm.ollama import (
 from runtime.llm.anthropic import (
     _build_anthropic_payload,
     _parse_anthropic_response,
+    _normalize_anthropic_url,
 )
 
 from runtime.llm.chatgpt import (
@@ -141,5 +144,6 @@ def _dedupe_candidates(candidates):
         seen.add(key)
         out.append(c)
     return out
+
 
 
