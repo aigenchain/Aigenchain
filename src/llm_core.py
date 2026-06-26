@@ -19,6 +19,14 @@ from runtime.llm.cache import (
     _configured_cached_model_ids,
     list_model_ids,
 )
+from runtime.llm.chatgpt import (
+    _normalize_chatgpt_subscription_url,
+    _message_content_as_text,
+    _chatgpt_subscription_instructions,
+    _build_chatgpt_responses_payload,
+    _format_chatgpt_subscription_error,
+    _format_upstream_error,
+)
 
 logger = logging.getLogger(__name__)
 
