@@ -1,3 +1,11 @@
+ANTHROPIC_MODELS = [
+    "claude-opus-4-20250514", "claude-opus-4",
+    "claude-sonnet-4-20250514", "claude-sonnet-4",
+    "claude-sonnet-4-5-20250929", "claude-sonnet-4-5",
+    "claude-haiku-4-20250514", "claude-haiku-4",
+    "claude-haiku-3-5-20241022", "claude-haiku-3-5",
+]
+
 def _convert_openai_content_to_anthropic(content):
     """Convert OpenAI multimodal content blocks to Anthropic format.
 

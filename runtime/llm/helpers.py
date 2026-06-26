@@ -163,3 +163,14 @@ def _supports_thinking(model: str) -> bool:
     m = model.lower()
     return any(p in m for p in _THINKING_MODEL_PATTERNS)
 
+def _as_content_blocks(content) -> List[Dict]:
+    """Coerce a message `content` into a list of content blocks.
+
+    A list (multimodal: text + image parts) passes through; a non-empty string
+    becomes a single text block; None/empty yields no blocks.
+    """
+    if isinstance(content, list):
+        return content
+    if content:
+        return [{"type": "text", "text": str(content)}]
+    return []

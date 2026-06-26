@@ -28,7 +28,9 @@ from runtime.llm.anthropic import (
 from runtime.llm.chatgpt import (
     _build_chatgpt_responses_payload,
 )
-
+from runtime.llm.helpers import (
+    _as_content_blocks,
+)
 logger = logging.getLogger(__name__)
 def llm_call(url: str, model: str, messages: List[Dict], temperature: float = LLMConfig.DEFAULT_TEMPERATURE,
              max_tokens: int = LLMConfig.DEFAULT_MAX_TOKENS, headers: Optional[Dict] = None, 

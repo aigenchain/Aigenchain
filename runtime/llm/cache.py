@@ -6,6 +6,7 @@ import hashlib
 import threading
 from typing import Optional, Dict, List, Tuple
 from urllib.parse import urlparse
+from runtime.llm.config import LLMConfig
 def _get_cache_key(url: str, model: str, messages: List[Dict], 
                    temperature: float, max_tokens: int) -> str:
     """Generate cache key for LLM requests."""
@@ -231,6 +232,28 @@ def _set_cached_response(cache_key: str, response: str) -> None:
             # and del would raise KeyError mid-eviction (issue #659).
             _response_cache.pop(key, None)
     _response_cache[cache_key] = response
+def _model_list_base(url: str) -> str:
+    """Normalize model/chat URLs to the configured endpoint base."""
+    base = (url or "").strip().rstrip("/")
+    for suffix in (
+        "/models",
+        "/chat/completions",
+        "/completions",
+        "/v1/messages",
+        "/responses",
+    ):
+        if base.endswith(suffix):
+            base = base[:-len(suffix)].rstrip("/")
+
+    for suffix in (
+        "/chat",
+        "/tags",
+        "/generate",
+    ):
+        if base.endswith("/api" + suffix):
+            base = base[:-len(suffix)].rstrip("/")
+
+    return base
 def _parse_model_cache(raw) -> List[str]:
     if not raw:
         return []
@@ -258,3 +281,112 @@ def _configured_cached_model_ids(
     endpoint_id: Optional[str] = None,
 ) -> List[str]:
     """Return cached models for a configured endpoint matching endpoint_url."""
+def _configured_cached_model_ids(
+    endpoint_url: str,
+    *,
+    owner: Optional[str] = None,
+    endpoint_id: Optional[str] = None,
+) -> List[str]:
+    """Return cached models for a configured endpoint matching endpoint_url."""
+    target = _model_list_base(endpoint_url)
+    if not target:
+        return []
+    try:
+        from src.database import SessionLocal, ModelEndpoint
+    except Exception:
+        return []
+    db = SessionLocal()
+    try:
+        q = db.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True)
+        if endpoint_id:
+            q = q.filter(ModelEndpoint.id == endpoint_id)
+        if owner:
+            from src.auth_helpers import owner_filter
+            q = owner_filter(q, ModelEndpoint, owner)
+        rows = q.all()
+        for ep in rows:
+            if _model_list_base(getattr(ep, "base_url", "")) != target:
+                continue
+            models = _parse_model_cache(getattr(ep, "cached_models", None) or getattr(ep, "models", None))
+            if not models:
+                continue
+            hidden = set(_parse_model_cache(getattr(ep, "hidden_models", None)))
+            return [m for m in models if m not in hidden]
+    except Exception:
+        return []
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+    return []
+
+
+def list_model_ids(
+    base_chat_url: str,
+    timeout: int = LLMConfig.DEFAULT_TIMEOUT,
+    headers: Optional[Dict] = None,
+    *,
+    owner: Optional[str] = None,
+    endpoint_id: Optional[str] = None,
+) -> List[str]:
+    """List available model IDs from an endpoint."""
+    cached = _configured_cached_model_ids(base_chat_url, owner=owner, endpoint_id=endpoint_id)
+    if cached:
+        return cached
+    provider = _detect_provider(base_chat_url)
+    if provider == "anthropic":
+        return list(ANTHROPIC_MODELS)
+    try:
+        h = {}
+        if headers:
+            h.update(headers)
+        if provider == "ollama":
+            models_url = _ollama_api_root(base_chat_url) + "/tags"
+        else:
+            from src.endpoint_resolver import build_models_url
+
+            models_url = build_models_url(base_chat_url)
+        r = httpx.get(models_url, headers=h, timeout=timeout)
+        r.raise_for_status()
+        data = r.json()
+        model_ids = [m.get("id") for m in (data.get("data") or []) if m.get("id")]
+        if not model_ids:
+            model_ids = [
+                m.get("name") or m.get("model")
+                for m in (data.get("models") or [])
+                if m.get("name") or m.get("model")
+            ]
+        return model_ids
+    except Exception:
+        try:
+            if ":11434" in base_chat_url or "ollama" in base_chat_url.lower():
+                root = base_chat_url.replace("/v1/chat/completions", "").replace("/chat/completions", "").rstrip("/")
+                r = httpx.get(root + "/api/tags", timeout=timeout)
+                r.raise_for_status()
+                return [m.get("name") or m.get("model") for m in (r.json().get("models") or []) if m.get("name") or m.get("model")]
+        except Exception:
+            pass
+        return []
+
+def normalize_model_id(
+    endpoint_url: str,
+    requested: str,
+    timeout: int = LLMConfig.DEFAULT_TIMEOUT,
+    *,
+    owner: Optional[str] = None,
+    endpoint_id: Optional[str] = None,
+) -> Optional[str]:
+    """Normalize a model ID to match available models."""
+    avail = list_model_ids(endpoint_url, timeout, owner=owner, endpoint_id=endpoint_id)
+    if not avail:
+        return None
+    if requested in avail:
+        return requested
+    import os as _os
+    req_base = _os.path.basename(requested.rstrip("/"))
+    for a in avail:
+        if _os.path.basename(a.rstrip("/")) == req_base:
+            return a
+    return None
+
