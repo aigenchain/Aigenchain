@@ -47,7 +47,6 @@ from runtime.llm.helpers import (
 )
 
 from runtime.llm.sync import (
-    llm_call,
     _dedupe_candidates,
 )
 async def llm_call_async_with_fallback(candidates, messages, **kwargs) -> str:
