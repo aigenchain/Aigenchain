@@ -1,0 +1,140 @@
+def _host_match(url: str, *domains: str) -> bool:
+    """Return True if url's hostname equals any of `domains` or is a subdomain of one.
+
+    Used by helpers that want "is this Anthropic?" / "is this OpenRouter?"
+    style checks. Prefer this over substring matching on the URL: the
+    substring form gives wrong answers for unrelated paths or query strings
+    that happen to contain the domain text.
+    """
+    if not url:
+        return False
+    try:
+        # rstrip(".") so a fully-qualified host with a trailing dot
+        # ("api.anthropic.com.") still matches "anthropic.com".
+        host = (urlparse(url).hostname or "").lower().rstrip(".")
+    except Exception:
+        return False
+    if not host:
+        return False
+    return any(host == d or host.endswith("." + d) for d in domains)
+
+
+def _detect_provider(url: str) -> str:
+    """Detect the API provider from a configured endpoint URL.
+
+    Matches on hostname (exact or subdomain) rather than substring, so a URL
+    that merely contains a provider's domain in its path or query — or a
+    look-alike host such as ``anthropic.com.example`` — is not misclassified.
+    Unknown hosts fall back to the OpenAI-compatible default, which the
+    majority of providers implement.
+    """
+    if _is_ollama_native_url(url):
+        return "ollama"
+    if _host_match(url, "anthropic.com"):
+        return "anthropic"
+    if _host_match(url, "opencode.ai/zen/go"):
+        return "opencode-go"
+    if _host_match(url, "opencode.ai/zen"):
+        return "opencode-zen"
+    if _host_match(url, "openrouter.ai"):
+        return "openrouter"
+    if _host_match(url, "groq.com"):
+        return "groq"
+    if _host_match(url, "nvidia.com"):
+        return "nvidia"
+    from src.chatgpt_subscription import is_chatgpt_subscription_base
+    if is_chatgpt_subscription_base(url):
+        return "chatgpt-subscription"
+    from src.copilot import is_copilot_base
+    if is_copilot_base(url):
+        return "copilot"
+    return "openai"
+
+
+def _is_self_hosted_openai_compatible(url: str) -> bool:
+    """True for custom/local OpenAI-compatible servers (llama.cpp, LM Studio,
+    vLLM, text-generation-webui, etc.) as opposed to cloud APIs.
+
+    Used to gate llama.cpp-server-specific payload extras (``session_id``,
+    ``cache_prompt``) used for KV-cache slot affinity (issue #2927). Strict
+    cloud providers reject unrecognized top-level fields (api.openai.com
+    returns 400, Mistral returns 422 "extra_forbidden", issue #3793), and any
+    unknown OpenAI-compatible host used to be treated as self-hosted, so those
+    fields leaked to every strict provider added as a custom endpoint.
+
+    A server only counts as self-hosted when it also resolves as local:
+    loopback/private/tailscale host, or the endpoint explicitly configured
+    with kind "local". A self-hosted server exposed via a public hostname
+    loses the affinity hint unless its endpoint kind is set to "local" -
+    a lost perf hint, versus a hard 4xx on every request the other way.
+    """
+    if _detect_provider(url) != "openai" or _host_match(url, "openai.com"):
+        return False
+    from src.model_context import is_local_endpoint
+    return is_local_endpoint(url)
+
+
+def _apply_local_cache_affinity(payload: Dict, url: str, session_id: Optional[str]) -> None:
+    """Add llama.cpp-server slot-affinity hints to an outgoing payload, in place.
+
+    As diagnosed in issue #2927, llama.cpp assigns requests to processing
+    slots via LRU when no stable identifier is present ("session_id=<empty>
+    server-selected (LCP/LRU)"), which means consecutive turns of the same
+    chat can land on different slots and lose their cached prefix entirely.
+    Sending a stable ``session_id`` (derived from the Odysseus session) lets
+    the server keep routing the same conversation to the same slot, and
+    ``cache_prompt: true`` asks it to retain/reuse the prefix it already has.
+
+    Both fields are llama.cpp / LM Studio extensions to the OpenAI schema; we
+    only set them for self-hosted OpenAI-compatible endpoints (never
+    api.openai.com or other cloud providers, which reject unrecognized
+    top-level request fields).
+    """
+    if not session_id:
+        return
+    if not _is_self_hosted_openai_compatible(url):
+        return
+    payload.setdefault("session_id", str(session_id))
+    payload.setdefault("cache_prompt", True)
+
+
+def _provider_headers(provider: str, headers: Optional[Dict] = None) -> Dict[str, str]:
+    h = {"Content-Type": "application/json"}
+    if isinstance(headers, dict):
+        h.update(headers)
+    if provider == "openrouter":
+        h.setdefault("HTTP-Referer", "https://github.com/pewdiepie-archdaemon/odysseus")
+        h.setdefault("X-OpenRouter-Title", "Odysseus")
+    if provider == "copilot":
+        # Ensure the Copilot-required headers are present even when the caller
+        # didn't pass pre-built headers (e.g. model listing). build_headers()
+        # already injects these for the live chat path; setdefault keeps any
+        # request-specific values (x-initiator/vision) the caller set.
+        from src.copilot import copilot_headers
+        for k, v in copilot_headers(None).items():
+            h.setdefault(k, v)
+    return h
+
+
+def _provider_label(url: str) -> str:
+    """Human-friendly provider name for error messages."""
+    if not url:
+        return "provider"
+    if _host_match(url, "anthropic.com"): return "Anthropic"
+    if _host_match(url, "ollama.com"): return "Ollama Cloud"
+    if _host_match(url, "x.ai"): return "xAI"
+    if _host_match(url, "openai.com"): return "OpenAI"
+    if _host_match(url, "openrouter.ai"): return "OpenRouter"
+    if _host_match(url, "opencode.ai/zen/go"): return "OpenCode Go"
+    if _host_match(url, "opencode.ai/zen"): return "OpenCode Zen"
+    if _host_match(url, "groq.com"): return "Groq"
+    from src.chatgpt_subscription import is_chatgpt_subscription_base
+    if is_chatgpt_subscription_base(url): return "ChatGPT Subscription"
+    from src.copilot import is_copilot_base
+    if is_copilot_base(url): return "GitHub Copilot"
+    if _host_match(url, "mistral.ai"): return "Mistral"
+    if _host_match(url, "deepseek.com"): return "DeepSeek"
+    if _host_match(url, "nvidia.com"): return "NVIDIA"
+    if _host_match(url, "googleapis.com"): return "Google"
+    if _host_match(url, "together.xyz", "together.ai"): return "Together"
+    if _host_match(url, "fireworks.ai"): return "Fireworks"
