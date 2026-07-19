@@ -99,6 +99,16 @@ DEFAULT_SETTINGS = {
     # widening the manual/auto keyword surface. Set False to require an
     # explicit web keyword (or the manual toggle) on every turn.
     "router_contextual_web_followup": True,
+    # Router (Tahap 3→4 bridge / Fase C1): when the knowledge classifier routes
+    # a turn to ``past_chat`` ("what did we discuss yesterday?", "kamu bilang
+    # apa soal X kemarin?"), retrieve matching snippets from the user's OTHER
+    # past sessions (owner-scoped, current session excluded) and inject them as
+    # untrusted context so the answer is grounded in real prior conversations
+    # instead of the model guessing. OFF by default — it adds a DB search on
+    # every past_chat turn and changes grounding, so opt in explicitly.
+    "router_past_chat_retrieval": False,
+    # Max snippets injected per past_chat turn (clamped 1..10).
+    "router_past_chat_limit": 3,
     "brave_api_key": "",
     "google_pse_key": "",
     "google_pse_cx": "",

@@ -623,6 +623,69 @@ def _session_is_research_spinoff(sess) -> bool:
     return False
 
 
+def _maybe_past_chat_context(message: str, owner: str, current_session_id: str):
+    """Return an untrusted-context message with prior-conversation snippets, or None.
+
+    Fase C1 (Tahap 3→4 bridge): when the knowledge classifier routes the turn to
+    ``past_chat`` and the ``router_past_chat_retrieval`` setting is on, search the
+    user's OTHER sessions (owner-scoped; the current session is excluded so the
+    live turn isn't fed back to itself) and inject the top matches as untrusted
+    context so the model answers from real prior conversations. Best-effort: any
+    failure returns None and the turn proceeds ungrounded (observability row on
+    the route layer still records ``knowledge_source=past_chat``).
+    """
+    if not message or not message.strip():
+        return None
+    try:
+        from src.settings import get_setting
+        from src.action_intents import resolve_knowledge_route
+
+        if not get_setting("router_past_chat_retrieval", False):
+            return None
+        route = resolve_knowledge_route(message)
+        if route.source != "past_chat" or not route.needs_retrieval:
+            return None
+
+        limit = get_setting("router_past_chat_limit", 3)
+        try:
+            limit = max(1, min(int(limit), 10))
+        except (TypeError, ValueError):
+            limit = 3
+
+        from src.session_search import search_session_messages
+
+        results = search_session_messages(
+            message,
+            limit=limit + 3,
+            owner=owner,
+            context_messages=0,
+        )
+        snippets = []
+        for r in results:
+            if getattr(r, "session_id", None) == current_session_id:
+                continue
+            snippet = (getattr(r, "content_snippet", "") or "").strip()
+            if not snippet:
+                continue
+            name = (getattr(r, "session_name", "") or "chat").strip() or "chat"
+            role = getattr(r, "role", "") or ""
+            snippets.append(f"- [{name}] {role}: {snippet}")
+            if len(snippets) >= limit:
+                break
+        if not snippets:
+            return None
+        body = (
+            "Snippets from the user's earlier conversations, retrieved because "
+            "this turn refers back to a past chat. Ground your answer in these "
+            "when relevant; do not invent details not present here.\n"
+            + "\n".join(snippets)
+        )
+        return untrusted_context_message("past conversations: retrieved context", body)
+    except Exception:
+        logger.debug("past_chat retrieval failed", exc_info=True)
+        return None
+
+
 async def build_chat_context(
     sess,
     request,
@@ -737,6 +800,20 @@ async def build_chat_context(
 
     # Capture used memories immediately
     used_memories = getattr(chat_processor, '_last_used_memories', [])
+
+    # Past-chat retrieval (Fase C1): when the turn refers back to earlier
+    # conversations, inject owner-scoped snippets from the user's other
+    # sessions. Suppressed for incognito / casual / research-spinoff turns
+    # (same grounding hygiene as memory/RAG above).
+    if (
+        not incognito
+        and not casual_low_signal
+        and not is_research_spinoff
+        and allow_tool_preprocessing
+    ):
+        _past_chat_msg = _maybe_past_chat_context(_ctx_msg, user, session_id)
+        if _past_chat_msg is not None:
+            preface.append(_past_chat_msg)
 
     # Inject pre-fetched search context (compare mode)
     if search_context and allow_tool_preprocessing and not casual_low_signal:
