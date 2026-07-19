@@ -91,6 +91,14 @@ DEFAULT_SETTINGS = {
     # backend itself decides, so operators stay in control of self-hosted /
     # niche search instances.
     "search_safesearch": "strict",
+    # Router (Tahap 5 / Fase C): when a turn is a short anaphoric follow-up
+    # ("what about in Europe?", "kalau yang di Amerika bagaimana?") AND the
+    # immediately preceding turn was a web lookup, inherit the web intent so
+    # the follow-up searches instead of answering from stale model knowledge.
+    # ON by default — it closes real contextual-follow-up misses without
+    # widening the manual/auto keyword surface. Set False to require an
+    # explicit web keyword (or the manual toggle) on every turn.
+    "router_contextual_web_followup": True,
     "brave_api_key": "",
     "google_pse_key": "",
     "google_pse_cx": "",

@@ -126,7 +126,25 @@ _WEB_FOLLOWUP_RE = re.compile(
 )
 _RECENT_WEB_CONTEXT_RE = re.compile(
     r"\b(?:weather|forecast|rain|raining|hourly|news|headlines|rate|exchange|currency|"
-    r"price|current|latest|search|look\s+up|online)\b",
+    r"price|current|latest|search|look\s+up|online|"
+    # Indonesian web-freshness cues so an ID web turn ("berita terbaru soal
+    # harga emas") is recognized as web context for an ID anaphoric follow-up.
+    r"berita|terbaru|terkini|harga|kurs|skor|jadwal|cuaca|ramalan|prakiraan|sekarang)\b",
+    re.I,
+)
+# Anaphoric topic-shift follow-ups that carry NO web keyword themselves but
+# inherit the previous turn's web intent (Fase C2). EN: "and what about in
+# Europe?", "what/how about X?", "and in Japan?". ID: "kalau yang di Amerika
+# bagaimana?", "kalau di Bandung gimana?", "bagaimana dengan X?".
+_ANAPHORIC_FOLLOWUP_RE = re.compile(
+    r"^\s*(?:and\s+)?"
+    r"(?:"
+    r"(?:what|how)\s+about\b"
+    r"|in\s+\w+\s*\??\s*$"
+    r"|kalau\b.*\b(?:bagaimana|gimana|gmn)\b"
+    r"|bagaimana\s+dengan\b"
+    r"|kalau\s+(?:yang\s+)?di\b"
+    r")",
     re.I,
 )
 
@@ -145,8 +163,31 @@ def _recent_session_text(sess, limit: int = 8, max_chars: int = 2000) -> str:
 
 
 def _is_contextual_web_followup(message: str, sess) -> bool:
-    """Treat short retry/check replies as web lookups when recent context was web."""
-    if not message or not _WEB_FOLLOWUP_RE.search(message):
+    """Treat short follow-up replies as web lookups when recent context was web.
+
+    Two shapes qualify, both only when the recent session text shows a web
+    lookup (``_RECENT_WEB_CONTEXT_RE``):
+
+    * a bare retry/check reply ("search again", "check now") —
+      ``_WEB_FOLLOWUP_RE``; always eligible.
+    * an anaphoric topic-shift follow-up that carries no web keyword itself
+      ("and what about in Europe?", "kalau yang di Amerika bagaimana?") —
+      ``_ANAPHORIC_FOLLOWUP_RE``; gated by the ``router_contextual_web_followup``
+      setting (Fase C2) so operators can require an explicit web keyword.
+    """
+    if not message:
+        return False
+    is_retry = bool(_WEB_FOLLOWUP_RE.search(message))
+    is_anaphoric = bool(_ANAPHORIC_FOLLOWUP_RE.search(message))
+    if is_anaphoric and not is_retry:
+        try:
+            from src.settings import get_setting
+
+            if not get_setting("router_contextual_web_followup", True):
+                return False
+        except Exception:
+            pass
+    if not (is_retry or is_anaphoric):
         return False
     return bool(_RECENT_WEB_CONTEXT_RE.search(_recent_session_text(sess)))
 
