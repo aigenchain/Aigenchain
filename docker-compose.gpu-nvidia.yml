@@ -9,6 +9,7 @@
 #
 # Requires the NVIDIA Container Toolkit on the host. See docker/gpu.nvidia.yml
 # for setup details.
+name: aigenchain
 services:
   aigenchain:
     build: .

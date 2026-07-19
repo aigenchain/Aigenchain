@@ -10,6 +10,7 @@
 # Requires ROCm drivers on the host (kfd + DRI devices) and the host user
 # running Docker in the `video` and `render` groups. Set RENDER_GID to your
 # host's numeric render group id when needed. See docker/gpu.amd.yml for details.
+name: aigenchain
 services:
   aigenchain:
     build: .
