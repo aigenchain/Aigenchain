@@ -119,6 +119,7 @@ class Session(TimestampMixin, Base):
     # Configuration flags
     rag = Column(Boolean, default=False)
     archived = Column(Boolean, default=False)
+    is_image = Column(Boolean, default=False)  # session routes through image generation
 
     # Organization
     folder = Column(String, nullable=True, default=None)
@@ -167,6 +168,7 @@ class Session(TimestampMixin, Base):
             'endpoint_url': self.endpoint_url,
             'rag': self.rag,
             'archived': self.archived,
+            'is_image': self.is_image,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'last_accessed': self.last_accessed.isoformat() if self.last_accessed else None,
@@ -207,6 +209,68 @@ class ChatMessage(Base):
     __table_args__ = (
         Index('ix_messages_session_time', 'session_id', 'timestamp'),  # Composite for efficient message retrieval
     )
+
+class RouterDecision(Base):
+    """One row per chat request capturing the router/orchestration decision.
+
+    Observability for Tahap 2: records how each `/api/chat_stream` request was
+    routed (mode, intent, web-search trigger, image fast-path, agent tools) so
+    orchestration behaviour can be analysed with SQL instead of grepping logs.
+    Writes are best-effort and must never affect the chat response.
+    """
+    __tablename__ = "router_decisions"
+
+    id = Column(String, primary_key=True, index=True)
+    # SET NULL (not CASCADE) so decisions survive session deletion — throwaway
+    # test sessions get deleted but their routing data should remain analysable.
+    session_id = Column(
+        String, ForeignKey("sessions.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
+    created_at = Column(DateTime, default=utcnow_naive, nullable=False, index=True)
+    owner = Column(String, nullable=True, index=True)
+
+    message_preview = Column(String, nullable=True)     # first ~200 chars
+
+    requested_mode = Column(String, nullable=True)      # chat | agent (from user)
+    effective_mode = Column(String, nullable=True)      # chat | agent | research
+    auto_escalated = Column(Boolean, default=False)
+    escalation_reason = Column(String, nullable=True)
+    intent_category = Column(String, nullable=True, index=True)  # image|web|calendar|...
+
+    search_enabled = Column(Boolean, default=False)
+    # manual | auto_intent | contextual_followup | none
+    search_trigger = Column(String, nullable=True)
+
+    image_fastpath = Column(Boolean, default=False)
+    image_clarify = Column(Boolean, default=False)
+    pending_resolved = Column(Boolean, default=False)
+
+    selected_tools = Column(JSON, nullable=True)        # list[str] from agent loop
+    agent_rounds = Column(Integer, default=0)
+    tool_calls = Column(Integer, default=0)
+
+    latency_ms = Column(Integer, nullable=True)
+    outcome = Column(String, nullable=True)             # ok | error | empty | clarify | cancelled
+    model = Column(String, nullable=True)
+    # Which exit path emitted this row — useful to prove full coverage.
+    exit_path = Column(String, nullable=True)
+
+    # ── Knowledge routing (Tahap 3) ──
+    # Which knowledge source the router judged should ground the answer:
+    # personal_recall | past_chat | personal_docs | web | none. Observability
+    # only — recorded even when retrieval is not forced.
+    knowledge_source = Column(String, nullable=True, index=True)
+    knowledge_reason = Column(String, nullable=True)
+    # True when the source is an internal store (memory / past chats / docs).
+    knowledge_retrieval = Column(Boolean, default=False)
+
+    __table_args__ = (
+        Index('ix_router_decisions_created', 'created_at'),
+        Index('ix_router_decisions_category_created', 'intent_category', 'created_at'),
+        Index('ix_router_decisions_knowledge', 'knowledge_source', 'created_at'),
+    )
+
 
 class Document(TimestampMixin, Base):
     """Living document that the AI can create and edit in-place."""
@@ -953,6 +1017,30 @@ def _migrate_add_model_endpoint_refresh_columns():
         except Exception:
             pass
 
+def _migrate_add_session_image_column():
+    """Add is_image column to sessions if it doesn't exist (image-generation mode)."""
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("PRAGMA table_info(sessions)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if columns and "is_image" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN is_image INTEGER DEFAULT 0")
+            conn.commit()
+            logging.getLogger(__name__).info("Migrated: added 'is_image' column to sessions")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"sessions is_image migration failed: {e}")
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def _migrate_add_task_run_model_column():
     """Add model column to task_runs if it doesn't exist (records which model ran)."""
     import sqlite3
@@ -1099,6 +1187,48 @@ def _migrate_add_mode_column():
             conn.close()
         except Exception:
             pass
+
+def _migrate_add_router_decision_knowledge_columns():
+    """Add Tahap 3 knowledge-routing columns to router_decisions if missing.
+
+    create_all() only creates absent tables — it never adds columns to an
+    existing one. Deployments that already have router_decisions (from Tahap 2)
+    need these columns backfilled or every write fails with 'no such column'.
+    """
+    import sqlite3
+    db_path = DATABASE_URL.replace("sqlite:///", "")
+    if not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = sqlite3.connect(db_path)
+        # If the table doesn't exist yet, create_all handles it — skip.
+        exists = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='router_decisions'"
+        ).fetchone()
+        if not exists:
+            return
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(router_decisions)").fetchall()]
+        if "knowledge_source" not in columns:
+            conn.execute("ALTER TABLE router_decisions ADD COLUMN knowledge_source TEXT")
+        if "knowledge_reason" not in columns:
+            conn.execute("ALTER TABLE router_decisions ADD COLUMN knowledge_reason TEXT")
+        if "knowledge_retrieval" not in columns:
+            conn.execute("ALTER TABLE router_decisions ADD COLUMN knowledge_retrieval BOOLEAN DEFAULT 0")
+        conn.commit()
+        logging.getLogger(__name__).info(
+            "Migrated: ensured knowledge_* columns on router_decisions"
+        )
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            f"router_decisions knowledge columns migration failed: {e}"
+        )
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
 
 def _migrate_add_folder_column():
     """Add folder column to sessions table if it doesn't exist."""
@@ -1829,6 +1959,7 @@ def init_db():
     _migrate_add_provider_auth_id_column()
     _migrate_add_supports_tools_column()
     _migrate_add_task_run_model_column()
+    _migrate_add_session_image_column()
     _migrate_add_owner_column()
     _migrate_add_document_archived_column()
     _migrate_add_last_message_at_column()
@@ -1865,6 +1996,7 @@ def init_db():
     _migrate_encrypt_signatures()
     _migrate_encrypt_endpoint_keys()
     _migrate_backfill_task_folders()
+    _migrate_add_router_decision_knowledge_columns()
 
 
 def _migrate_backfill_task_folders():
@@ -2362,6 +2494,176 @@ def get_session_by_id(session_id: str):
     """Get a session by ID"""
     with get_db_session() as db:
         return db.query(Session).filter(Session.id == session_id).first()
+
+
+# ---------------------------------------------------------------------------
+# Router decision observability (Tahap 2)
+# ---------------------------------------------------------------------------
+_ROUTER_DECISION_FIELDS = {
+    "session_id", "owner", "message_preview", "requested_mode", "effective_mode",
+    "auto_escalated", "escalation_reason", "intent_category", "search_enabled",
+    "search_trigger", "image_fastpath", "image_clarify", "pending_resolved",
+    "selected_tools", "agent_rounds", "tool_calls", "latency_ms", "outcome",
+    "model", "exit_path",
+    "knowledge_source", "knowledge_reason", "knowledge_retrieval",
+}
+
+
+def record_router_decision(**fields) -> bool:
+    """Persist one router decision row. Best-effort: never raises.
+
+    Unknown keys are ignored so callers can pass a loose trace dict. A failure
+    here must never affect the chat response, so all errors are swallowed.
+    """
+    try:
+        import uuid as _uuid
+        data = {k: v for k, v in fields.items() if k in _ROUTER_DECISION_FIELDS}
+        # Trim the preview defensively.
+        mp = data.get("message_preview")
+        if isinstance(mp, str) and len(mp) > 200:
+            data["message_preview"] = mp[:200]
+        row = RouterDecision(id=str(_uuid.uuid4()), **data)
+        with get_db_session() as db:
+            db.add(row)
+        return True
+    except Exception:
+        logger.warning("Failed to record router decision", exc_info=True)
+        return False
+
+
+def get_router_decisions(
+    *, limit: int = 100, session_id: str = None,
+    since: datetime = None, category: str = None,
+    knowledge_source: str = None,
+):
+    """Return recent router decisions (newest first) as a list of dicts."""
+    try:
+        with get_db_session() as db:
+            q = db.query(RouterDecision)
+            if session_id:
+                q = q.filter(RouterDecision.session_id == session_id)
+            if category:
+                q = q.filter(RouterDecision.intent_category == category)
+            if knowledge_source:
+                q = q.filter(RouterDecision.knowledge_source == knowledge_source)
+            if since is not None:
+                q = q.filter(RouterDecision.created_at >= since)
+            q = q.order_by(RouterDecision.created_at.desc()).limit(max(1, min(limit, 1000)))
+            rows = q.all()
+            out = []
+            for r in rows:
+                out.append({
+                    "id": r.id,
+                    "session_id": r.session_id,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                    "owner": r.owner,
+                    "message_preview": r.message_preview,
+                    "requested_mode": r.requested_mode,
+                    "effective_mode": r.effective_mode,
+                    "auto_escalated": bool(r.auto_escalated),
+                    "escalation_reason": r.escalation_reason,
+                    "intent_category": r.intent_category,
+                    "search_enabled": bool(r.search_enabled),
+                    "search_trigger": r.search_trigger,
+                    "image_fastpath": bool(r.image_fastpath),
+                    "image_clarify": bool(r.image_clarify),
+                    "pending_resolved": bool(r.pending_resolved),
+                    "selected_tools": r.selected_tools,
+                    "agent_rounds": r.agent_rounds,
+                    "tool_calls": r.tool_calls,
+                    "latency_ms": r.latency_ms,
+                    "outcome": r.outcome,
+                    "model": r.model,
+                    "exit_path": r.exit_path,
+                    "knowledge_source": r.knowledge_source,
+                    "knowledge_reason": r.knowledge_reason,
+                    "knowledge_retrieval": bool(r.knowledge_retrieval),
+                })
+            return out
+    except Exception:
+        logger.warning("Failed to query router decisions", exc_info=True)
+        return []
+
+
+def get_router_decisions_summary(*, since: datetime = None):
+    """Aggregate router decisions for analysis (basis for the manual-toggle call)."""
+    try:
+        with get_db_session() as db:
+            q = db.query(RouterDecision)
+            if since is not None:
+                q = q.filter(RouterDecision.created_at >= since)
+            rows = [
+                {
+                    "intent_category": r.intent_category,
+                    "search_trigger": r.search_trigger,
+                    "outcome": r.outcome,
+                    "exit_path": r.exit_path,
+                    "auto_escalated": r.auto_escalated,
+                    "search_enabled": r.search_enabled,
+                    "agent_rounds": r.agent_rounds,
+                    "tool_calls": r.tool_calls,
+                    "latency_ms": r.latency_ms,
+                    "knowledge_source": r.knowledge_source,
+                    "knowledge_retrieval": r.knowledge_retrieval,
+                }
+                for r in q.all()
+            ]
+        total = len(rows)
+        by_category: dict = {}
+        by_search_trigger: dict = {}
+        by_outcome: dict = {}
+        by_exit_path: dict = {}
+        by_knowledge_source: dict = {}
+        auto_escalated = 0
+        search_enabled = 0
+        knowledge_retrieval = 0
+        rounds_sum = 0
+        tool_calls_sum = 0
+        latency_vals = []
+        for r in rows:
+            by_category[r["intent_category"] or ""] = by_category.get(r["intent_category"] or "", 0) + 1
+            by_search_trigger[r["search_trigger"] or "none"] = by_search_trigger.get(r["search_trigger"] or "none", 0) + 1
+            by_outcome[r["outcome"] or ""] = by_outcome.get(r["outcome"] or "", 0) + 1
+            by_exit_path[r["exit_path"] or ""] = by_exit_path.get(r["exit_path"] or "", 0) + 1
+            by_knowledge_source[r["knowledge_source"] or "none"] = by_knowledge_source.get(r["knowledge_source"] or "none", 0) + 1
+            if r["auto_escalated"]:
+                auto_escalated += 1
+            if r["search_enabled"]:
+                search_enabled += 1
+            if r["knowledge_retrieval"]:
+                knowledge_retrieval += 1
+            rounds_sum += (r["agent_rounds"] or 0)
+            tool_calls_sum += (r["tool_calls"] or 0)
+            if r["latency_ms"] is not None:
+                latency_vals.append(r["latency_ms"])
+        latency_vals.sort()
+
+        def _pct(p):
+            if not latency_vals:
+                return None
+            idx = min(len(latency_vals) - 1, int(round((p / 100.0) * (len(latency_vals) - 1))))
+            return latency_vals[idx]
+
+        return {
+            "total": total,
+            "auto_escalated": auto_escalated,
+            "search_enabled": search_enabled,
+            "knowledge_retrieval": knowledge_retrieval,
+            "by_category": by_category,
+            "by_knowledge_source": by_knowledge_source,
+            "by_search_trigger": by_search_trigger,
+            "by_outcome": by_outcome,
+            "by_exit_path": by_exit_path,
+            "avg_agent_rounds": (rounds_sum / total) if total else 0,
+            "avg_tool_calls": (tool_calls_sum / total) if total else 0,
+            "latency_ms": {
+                "p50": _pct(50), "p95": _pct(95),
+                "max": latency_vals[-1] if latency_vals else None,
+            },
+        }
+    except Exception:
+        logger.warning("Failed to summarise router decisions", exc_info=True)
+        return {"total": 0}
 
 def get_upcoming_events(owner, horizon_days: int = 60, limit: int = 40):
     """Upcoming, non-cancelled events as {uid, title, start} dicts, soonest first.

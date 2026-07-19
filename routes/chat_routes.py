@@ -27,7 +27,7 @@ from core.exceptions import SessionNotFoundError
 from src.auth_helpers import effective_user, get_current_user
 from routes.session_routes import _verify_session_owner
 from routes.document_helpers import _owner_session_filter
-from core.database import SessionLocal, get_session_mode, set_session_mode
+from core.database import SessionLocal, get_session_mode, set_session_mode, record_router_decision
 from core.database import Session as DBSession, ChatMessage as DBChatMessage
 from core.database import Document as DBDocument, ModelEndpoint
 from core.log_safety import redact_url
@@ -41,7 +41,17 @@ from routes.chat_helpers import (
     clean_thinking_for_save,
     _enforce_chat_privileges,
 )
-from src.action_intents import ToolIntent, classify_tool_intent as _classify_tool_intent
+from src.action_intents import (
+    ToolIntent,
+    classify_tool_intent as _classify_tool_intent,
+    resolve_knowledge_route as _resolve_knowledge_route,
+    is_image_edit_intent as _is_image_edit_intent,
+    is_image_question_intent as _is_image_question_intent,
+    is_ambiguous_image_intent as _is_ambiguous_image_intent,
+    is_affirmative as _is_affirmative,
+    is_negative as _is_negative,
+    extract_image_subject as _extract_image_subject,
+)
 from src.tool_policy import (
     WEB_TOOL_NAMES,
     build_effective_tool_policy,
@@ -141,6 +151,174 @@ def _is_contextual_web_followup(message: str, sess) -> bool:
     return bool(_RECENT_WEB_CONTEXT_RE.search(_recent_session_text(sess)))
 
 
+def _find_last_generated_image(sess) -> Optional[Dict[str, Any]]:
+    """Return {url, prompt, model} for the most recent image made in this session.
+
+    Scans the persisted assistant turns newest-first for a ``tool_events`` entry
+    that carries an ``image_url`` (the same shape the image fast-path saves).
+    Used by follow-up handlers so "fix the face" / "what is this image?" can act
+    on the actual last picture instead of starting over blind.
+    """
+    history = getattr(sess, "history", None) or getattr(sess, "_history", None) or []
+    for msg in reversed(history):
+        role = getattr(msg, "role", None) or (msg.get("role") if isinstance(msg, dict) else None)
+        if role != "assistant":
+            continue
+        meta = getattr(msg, "metadata", None)
+        if meta is None and isinstance(msg, dict):
+            meta = msg.get("metadata")
+        if not isinstance(meta, dict):
+            continue
+        for ev in reversed(meta.get("tool_events") or []):
+            if isinstance(ev, dict) and ev.get("image_url"):
+                return {
+                    "url": ev.get("image_url"),
+                    "prompt": ev.get("image_prompt") or "",
+                    "model": ev.get("image_model") or "",
+                }
+    return None
+
+
+def _find_pending_image_prompt(sess) -> Optional[str]:
+    """Return the subject of a still-open image clarification, else None.
+
+    When the assistant asks "Maksudnya kamu mau aku bikinin gambar X-nya?" it
+    persists ``metadata.pending_image_prompt = X`` on that assistant turn. If the
+    *most recent* assistant turn carries that flag (i.e. the user's reply is the
+    very next message), the pending request is still open and this returns X.
+    """
+    history = getattr(sess, "history", None) or getattr(sess, "_history", None) or []
+    for msg in reversed(history):
+        role = getattr(msg, "role", None) or (msg.get("role") if isinstance(msg, dict) else None)
+        if role == "user":
+            continue
+        if role != "assistant":
+            return None
+        meta = getattr(msg, "metadata", None)
+        if meta is None and isinstance(msg, dict):
+            meta = msg.get("metadata")
+        if isinstance(meta, dict):
+            p = meta.get("pending_image_prompt")
+            if isinstance(p, str) and p.strip():
+                return p.strip()
+        return None
+    return None
+
+
+def _generated_image_url_to_path(image_url: str) -> Optional[str]:
+    """Map a ``/api/generated-image/<file>`` URL to its on-disk path, safely."""
+    if not image_url:
+        return None
+    marker = "/api/generated-image/"
+    idx = image_url.find(marker)
+    if idx == -1:
+        return None
+    filename = image_url[idx + len(marker):].split("?")[0].split("/")[-1].strip()
+    if not filename or filename in (".", ".."):
+        return None
+    from src.constants import GENERATED_IMAGES_DIR
+    candidate = os.path.normpath(os.path.join(GENERATED_IMAGES_DIR, filename))
+    base = os.path.normpath(GENERATED_IMAGES_DIR)
+    if not candidate.startswith(base + os.sep):
+        return None
+    return candidate if os.path.isfile(candidate) else None
+
+
+def _chunk_text(text: str, size: int = 400):
+    """Yield ``text`` in fixed-size slices for smoother SSE streaming."""
+    for i in range(0, len(text), size):
+        yield text[i:i + size]
+
+
+def _vl_answer_for_image(image_path: str, question: str, owner: str | None) -> Dict[str, Any]:
+    """Ask the admin-configured vision model about a specific image.
+
+    Reuses the same VL resolver + fallback chain as upload analysis, but with a
+    question-driven prompt so the model can answer "what is this?" or judge a
+    defect ("why does the face look weird?") from the real pixels.
+    Returns {"text", "model"} — text starting with "[" signals unavailable.
+    """
+    import base64
+    from src.document_processor import _load_vl_settings, _resolve_vl_model
+    from src.llm_core import llm_call
+
+    settings = _load_vl_settings()
+    if not settings.get("vision_enabled", True):
+        return {"text": "[Vision is disabled — enable it in Settings → Vision]", "model": ""}
+    vl_model = settings.get("vision_model", "")
+
+    _q = (question or "").strip() or "Describe this image in detail."
+    _prompt = (
+        "You are looking at an image you generated earlier in this conversation. "
+        "Answer the user's message about it based on what is ACTUALLY visible in "
+        "the image. Do not deny the image exists. Reply in the user's language.\n\n"
+        f"User: {_q}"
+    )
+
+    # ── Preferred path: Cloudflare Workers AI vision ──
+    # When the active image provider is Cloudflare, reuse its credentials to
+    # call a Cloudflare vision model via the native run API (the OpenAI-style
+    # image_url format below does not work against Cloudflare's native
+    # endpoint). The configured `vision_model` is used only if it is an actual
+    # `@cf/...` vision model — a flux *image-gen* model cannot see images, so
+    # fall back to the sensible Cloudflare vision default in that case.
+    try:
+        from src import image_providers as _ip
+        _active = _ip.get_active_provider()
+        if _active and _active.get("provider") == "cloudflare":
+            _cfg = _active.get("config", {}) or {}
+            _cf_vision = ""
+            if isinstance(vl_model, str) and vl_model.startswith("@cf/") and "flux" not in vl_model.lower():
+                _cf_vision = vl_model
+            with open(image_path, "rb") as f:
+                _img_bytes = f.read()
+            _text = _ip.describe_image_via_cloudflare(
+                _cfg, _img_bytes, _prompt, vision_model=_cf_vision, timeout=120.0
+            )
+            _used = _cf_vision or _ip.CLOUDFLARE_VISION_MODEL
+            if _text:
+                return {"text": _text, "model": _used}
+    except Exception as _cfe:
+        logger.warning(f"[vision] Cloudflare vision failed ({type(_cfe).__name__}: {_cfe}); trying OpenAI-style VL")
+
+    # ── Fallback: OpenAI-compatible vision endpoint (gpt-4o, gemini, qwen-vl) ──
+    try:
+        url, model_id, headers = _resolve_vl_model(vl_model, owner=owner)
+    except ValueError:
+        return {"text": "[No vision model configured — set one in Settings → Vision]", "model": vl_model or ""}
+
+    with open(image_path, "rb") as f:
+        img_data = base64.b64encode(f.read()).decode("utf-8")
+    ext = os.path.splitext(image_path)[1].lower()
+    img_format = {".jpg": "jpeg", ".jpeg": "jpeg", ".png": "png", ".gif": "gif", ".webp": "webp"}.get(ext, "jpeg")
+    vl_messages = [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": _prompt},
+            {"type": "image_url", "image_url": {"url": f"data:image/{img_format};base64,{img_data}"}},
+        ],
+    }]
+
+    try:
+        from src.endpoint_resolver import resolve_vision_fallback_candidates
+        _candidates = [(url, model_id, headers)] + resolve_vision_fallback_candidates(owner=owner)
+    except Exception:
+        _candidates = [(url, model_id, headers)]
+
+    last_err = None
+    for i, cand in enumerate([c for c in _candidates if c and c[0] and c[1]]):
+        _url, _model, _headers = cand
+        try:
+            desc = llm_call(_url, _model, vl_messages, headers=_headers, timeout=120)
+            return {"text": desc, "model": _model}
+        except Exception as e:
+            last_err = e
+            logger.warning(f"[vision followup] {_model} failed ({type(e).__name__}); trying next")
+            continue
+    logger.error(f"Vision follow-up unavailable: {last_err}")
+    return {"text": "[VL model unavailable - image not analyzed]", "model": ""}
+
+
 def _resolve_request_workspace(request, raw_value) -> tuple:
     """Resolve the posted workspace for this request: (workspace, rejected).
 
@@ -234,40 +412,14 @@ def _endpoint_cache_contains_model(endpoint, model: str) -> bool:
 
 
 def _is_image_generation_session(sess, owner: str | None = None) -> bool:
-    """Whether this chat session should bypass text chat and generate images.
+    """Deprecated: image generation is no longer a sticky per-session mode.
 
-    Model-name prefixes are explicit image models. Endpoint type is only used
-    when the current session endpoint actually matches that image endpoint, and
-    when a populated endpoint model cache includes the selected model. This
-    prevents an image endpoint on the same host from misrouting ordinary text
-    models into the image-generation path.
+    Images are produced ONLY when the LLM explicitly calls the
+    ``generate_image`` tool in response to a clear user request (ChatGPT/Gemini
+    style). There is no longer a "force image" routing that bypasses text chat,
+    and the legacy ``sess.is_image`` flag is intentionally ignored so old
+    sessions that got locked into image mode behave like normal chats again.
     """
-    model = (getattr(sess, "model", "") or "").strip()
-    if any(model.lower().startswith(prefix) for prefix in _IMAGE_MODEL_PREFIXES):
-        return True
-
-    endpoint_url = (getattr(sess, "endpoint_url", "") or "").strip()
-    if not endpoint_url:
-        return False
-
-    db = SessionLocal()
-    try:
-        q = db.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True)
-        if owner:
-            from src.auth_helpers import owner_filter
-            q = owner_filter(q, ModelEndpoint, owner)
-        endpoints = q.all()
-        for endpoint in endpoints:
-            if (getattr(endpoint, "model_type", None) or "llm") != "image":
-                continue
-            if not _session_url_matches_endpoint(endpoint_url, getattr(endpoint, "base_url", "") or ""):
-                continue
-            if _endpoint_cache_contains_model(endpoint, model):
-                return True
-    except Exception:
-        return False
-    finally:
-        db.close()
     return False
 
 
@@ -569,6 +721,9 @@ def setup_chat_routes(
         # manual form posts that still send plan_mode=true.
         plan_mode = False
         chat_mode = str(form_data.get("mode", "")).lower()  # 'chat' or 'agent'
+        # Image generation is no longer a forced mode. It happens only when the
+        # LLM calls the generate_image tool for an explicit user request.
+        image_mode = False
         # Workspace: confine the agent's file/shell tools to this folder.
         workspace, workspace_rejected = _resolve_request_workspace(
             request, form_data.get("workspace")
@@ -610,6 +765,11 @@ def setup_chat_routes(
             chat_mode = "agent"
             auto_escalated = True
             logger.info("chat→agent auto-escalation: search enabled")
+        # A clear image request must not detour through web search first — that
+        # adds many seconds of SearXNG round-trips before the image is even
+        # generated. Disable web for this turn regardless of chat/agent mode.
+        if _tool_intent and _tool_intent.category == "image":
+            _search_enabled = False
         active_doc_id = form_data.get("active_doc_id", "").strip()
         logger.info(f"[doc-inject] chat_mode={chat_mode}, active_doc_id={active_doc_id!r}")
 
@@ -902,6 +1062,26 @@ def setup_chat_routes(
         elif _search_enabled:
             disabled_tools.difference_update(WEB_TOOL_NAMES)
 
+        # A direct "make me an image" request should focus on generate_image
+        # and not drift into shell/personal/document tools. This mirrors the
+        # explicit-web focusing above and keeps behaviour ChatGPT/Gemini-like.
+        _explicit_image_intent = bool(_tool_intent and _tool_intent.category == "image")
+        if _explicit_image_intent:
+            disabled_tools.update({
+                "bash", "python",
+                "search_chats", "manage_skills", "manage_memory",
+                "read_file", "write_file", "edit_file",
+                "create_document", "edit_document", "update_document",
+                "send_email", "reply_to_email",
+                "manage_notes", "manage_calendar", "manage_tasks",
+                "api_call", "builtin_browser",
+            })
+            # A "make me an image" request must not detour through web search
+            # first — that adds many seconds for no benefit. Keep it focused on
+            # generate_image only.
+            disabled_tools.update(WEB_TOOL_NAMES)
+            disabled_tools.discard("generate_image")
+
         # Nobody/incognito mode: deny tools that would expose the user's
         # persistent memory, past chats, or other identity-linked data.
         if incognito:
@@ -1007,6 +1187,102 @@ def setup_chat_routes(
         if _effective_mode in ('agent', 'research', 'chat'):
             set_session_mode(session, _effective_mode)
 
+        # ── Router-decision observability trace (Tahap 2) ─────────────────────
+        # One row per request. Populated as decisions are made below and written
+        # exactly once in _safe_stream's finally (covers every exit path,
+        # including early returns, DONE, exceptions and client disconnects).
+        # Best-effort: recording failures never affect the response.
+        _manual_web = bool(
+            str(use_web).lower() == "true"
+            or str(allow_web_search).lower() == "true"
+        )
+        # Web is "active" for this turn when either the manual toggle forced it
+        # (_search_enabled) OR the router auto-detected a web intent and escalated
+        # to the agent — which offers/forces the web_search + web_fetch tools even
+        # though the manual _search_enabled flag stays False. Recording only the
+        # manual flag would hide every auto-detected web turn (measured as a huge
+        # false-negative rate), so track the auto path explicitly.
+        _auto_web_intent = bool(_tool_intent and _tool_intent.category == "web")
+        _web_active = bool(_search_enabled or _auto_web_intent)
+        if not _web_active:
+            _search_trigger = "none"
+        elif _manual_web and not _auto_web_intent:
+            _search_trigger = "manual"
+        elif _auto_web_intent:
+            _search_trigger = (
+                "contextual_followup"
+                if (_tool_intent.reason or "").startswith("contextual")
+                else "auto_intent"
+            )
+        elif _manual_web:
+            _search_trigger = "manual"
+        else:
+            _search_trigger = "auto_intent"
+        # ── Knowledge routing (Tahap 3) ──
+        # Resolve which knowledge source should ground the answer. Observability
+        # only: the decision is recorded but does not force retrieval. Web active
+        # (manual or auto-intent) supersedes model knowledge for freshness.
+        try:
+            _knowledge_route = _resolve_knowledge_route(
+                message if isinstance(message, str) else "",
+                tool_category=(_tool_intent.category if _tool_intent else None),
+                web_active=_web_active,
+            )
+        except Exception:
+            _knowledge_route = None
+        _router_trace: Dict[str, Any] = {
+            "session_id": session,
+            "owner": _user,
+            "message_preview": message if isinstance(message, str) else None,
+            "requested_mode": ("agent" if user_requested_agent else "chat"),
+            "effective_mode": _effective_mode,
+            "auto_escalated": bool(auto_escalated),
+            "escalation_reason": (
+                f"category={_tool_intent.category}; {_tool_intent.reason}"
+                if (auto_escalated and _tool_intent) else
+                ("search enabled" if auto_escalated else None)
+            ),
+            "intent_category": (_tool_intent.category if _tool_intent else None),
+            "search_enabled": bool(_web_active),
+            "search_trigger": _search_trigger,
+            "image_fastpath": False,
+            "image_clarify": False,
+            "pending_resolved": False,
+            "selected_tools": None,
+            "agent_rounds": 0,
+            "tool_calls": 0,
+            "latency_ms": None,
+            "outcome": None,
+            "model": getattr(sess, "model", None),
+            "exit_path": None,
+            "knowledge_source": (_knowledge_route.source if _knowledge_route else None),
+            "knowledge_reason": (_knowledge_route.reason if _knowledge_route else None),
+            "knowledge_retrieval": bool(_knowledge_route.needs_retrieval) if _knowledge_route else False,
+            "_start": time.time(),
+            "_recorded": False,
+        }
+
+        def _record_trace(exit_path: str = None, outcome: str = None) -> None:
+            """Write the router-decision row exactly once (idempotent)."""
+            if _router_trace.get("_recorded"):
+                return
+            _router_trace["_recorded"] = True
+            if exit_path and not _router_trace.get("exit_path"):
+                _router_trace["exit_path"] = exit_path
+            if outcome and not _router_trace.get("outcome"):
+                _router_trace["outcome"] = outcome
+            try:
+                _router_trace["latency_ms"] = int(
+                    (time.time() - _router_trace.get("_start", time.time())) * 1000
+                )
+            except Exception:
+                _router_trace["latency_ms"] = None
+            _payload = {
+                k: v for k, v in _router_trace.items()
+                if not k.startswith("_")
+            }
+            record_router_decision(**_payload)
+
         async def stream_with_save() -> AsyncGenerator[str, None]:
             # _effective_mode is read-only here; closure captures it from
             # the outer scope. (Was `nonlocal` but never reassigned.)
@@ -1043,6 +1319,263 @@ def setup_chat_routes(
             # Emit which memories were injected into context (captured before stream)
             if ctx.used_memories:
                 yield f"data: {json.dumps({'type': 'memories_used', 'data': ctx.used_memories})}\n\n"
+
+            # ── Follow-up on the LAST generated image ──────────────────────
+            # Two cases when a prior image exists in this session:
+            #   1. EDIT  ("perbaiki mukanya", "make it more realistic"): the
+            #      text-to-image model has no img2img, so regenerate from the
+            #      previous prompt + the requested change. Handled by promoting
+            #      to the image fast-path below with a merged prompt.
+            #   2. ANALYZE ("gambar apa ini?", "kok mukanya aneh?"): feed the
+            #      actual image file to the vision model so the answer is based
+            #      on real pixels, not the prompt text — the chat model cannot
+            #      see the picture and would otherwise deny it exists.
+            _image_edit_prompt: str | None = None
+            # Local copy so we can promote a follow-up to the image fast-path
+            # without rebinding the enclosing-scope name (which would make it a
+            # local everywhere in this generator and raise UnboundLocalError).
+            _run_image_fastpath = _explicit_image_intent
+
+            # ── Ambiguous image intent: clarify instead of refusing ──────────
+            # Principle: detect the *intent* to make a picture even without an
+            # image noun ("gambar"/"image"). When it's clearly an image request
+            # we already ran the fast-path above; when it's ambiguous we ask a
+            # friendly yes/no ("Maksudnya kamu mau aku bikinin gambar X-nya?")
+            # and remember the subject. The user's next reply resolves it.
+            _pending_prompt = (
+                _find_pending_image_prompt(sess) if isinstance(message, str) else None
+            )
+            if (
+                isinstance(message, str)
+                and not _explicit_image_intent
+                and _pending_prompt
+                and not tool_policy.blocks("generate_image")
+            ):
+                _reply = message.strip()
+                if _is_affirmative(_reply):
+                    # Confirmed → generate from the remembered subject. If the
+                    # reply carries extra detail beyond a bare "iya", fold it in.
+                    _extra = _reply
+                    _bare = _extra.lower().rstrip(" .!,")
+                    if len(_bare) <= 12:
+                        _image_edit_prompt = _pending_prompt
+                    else:
+                        _image_edit_prompt = f"{_pending_prompt}, {_extra}"
+                    _run_image_fastpath = True
+                    _router_trace["pending_resolved"] = True
+                elif _is_negative(_reply):
+                    # Declined → acknowledge briefly and continue as normal chat.
+                    _ack = "Oke, aku batalkan pembuatan gambarnya. Ada yang lain yang bisa kubantu?"
+                    yield f'data: {json.dumps({"delta": _ack})}\n\n'
+                    try:
+                        save_assistant_response(
+                            sess, session_manager, session, _ack,
+                            {"model": sess.model, "requested_model": sess.model},
+                            incognito=incognito,
+                        )
+                    except Exception as _se:
+                        logger.warning(f"Failed to persist clarification decline: {_se}")
+                    _router_trace["pending_resolved"] = True
+                    _record_trace(exit_path="image_pending_decline", outcome="cancelled")
+                    yield "data: [DONE]\n\n"
+                    _stream_set(session, status="done")
+                    _active_streams.pop(session, None)
+                    return
+                # Neither yes nor no → fall through; treat as a fresh message
+                # (it may itself be a new explicit/ambiguous request handled below).
+
+            if (
+                isinstance(message, str)
+                and not _run_image_fastpath
+                and not _pending_prompt
+                and _is_ambiguous_image_intent(message)
+                and not tool_policy.blocks("generate_image")
+            ):
+                # Extract the subject to echo it back in the question.
+                _subject = _extract_image_subject(message) or message.strip()
+                _q = (
+                    f"Maksudnya kamu mau aku bikinin gambar {_subject}-nya? "
+                    f"Kalau iya, balas \"iya\" dan aku langsung buatkan gambarnya. "
+                    f"Kalau maksudmu lain, kasih tahu ya."
+                )
+                yield f'data: {json.dumps({"type": "model_info", "model": sess.model})}\n\n'
+                for _piece in _chunk_text(_q, 400):
+                    yield f'data: {json.dumps({"delta": _piece})}\n\n'
+                try:
+                    save_assistant_response(
+                        sess, session_manager, session, _q,
+                        {
+                            "model": sess.model,
+                            "requested_model": sess.model,
+                            "pending_image_prompt": _subject,
+                        },
+                        incognito=incognito,
+                    )
+                except Exception as _se:
+                    logger.warning(f"Failed to persist image clarification: {_se}")
+                _router_trace["image_clarify"] = True
+                _record_trace(exit_path="image_clarify", outcome="clarify")
+                yield "data: [DONE]\n\n"
+                _stream_set(session, status="done")
+                _active_streams.pop(session, None)
+                return
+
+            if isinstance(message, str) and not _explicit_image_intent and not _run_image_fastpath:
+                _prev_img = _find_last_generated_image(sess)
+                if _prev_img:
+                    if _is_image_edit_intent(message):
+                        _prev_prompt = (_prev_img.get("prompt") or "").strip()
+                        if _prev_prompt:
+                            _image_edit_prompt = f"{_prev_prompt}. {message.strip()}"
+                        else:
+                            _image_edit_prompt = message.strip()
+                        _run_image_fastpath = True
+                        _router_trace["intent_category"] = (
+                            _router_trace.get("intent_category") or "image_edit"
+                        )
+                    elif _is_image_question_intent(message):
+                        _img_path = _generated_image_url_to_path(_prev_img.get("url", ""))
+                        if _img_path:
+                            try:
+                                yield f'data: {json.dumps({"type": "tool_start", "tool": "analyze_image"})}\n\n'
+                                _vl = await asyncio.to_thread(
+                                    _vl_answer_for_image, _img_path, message, _user
+                                )
+                                _answer = (_vl or {}).get("text") or ""
+                                _vl_model = (_vl or {}).get("model") or "vision"
+                                if _answer and not _answer.startswith("["):
+                                    yield f'data: {json.dumps({"type": "model_info", "model": _vl_model, "suffix": "Vision"})}\n\n'
+                                    for _piece in _chunk_text(_answer, 400):
+                                        yield f'data: {json.dumps({"delta": _piece})}\n\n'
+                                    try:
+                                        save_assistant_response(
+                                            sess, session_manager, session,
+                                            _answer,
+                                            {"model": _vl_model, "requested_model": _vl_model},
+                                            incognito=incognito,
+                                        )
+                                    except Exception as _se:
+                                        logger.warning(f"Failed to persist vision answer: {_se}")
+                                    _router_trace["intent_category"] = (
+                                        _router_trace.get("intent_category") or "image_analyze"
+                                    )
+                                    _router_trace["model"] = _vl_model
+                                    _record_trace(exit_path="image_analyze", outcome="ok")
+                                    yield "data: [DONE]\n\n"
+                                    _stream_set(session, status="done")
+                                    _active_streams.pop(session, None)
+                                    return
+                                else:
+                                    logger.info("Vision analysis unavailable; falling through to chat model")
+                            except Exception as _vle:
+                                logger.warning(f"Image analysis fast-path failed, falling through: {_vle}")
+
+            # ── Explicit image request → dedicated image model fast-path ──
+            # Runs BEFORE research/web-search and BEFORE the chat/agent LLM. When
+            # the user clearly asks for an image, generate it directly with the
+            # admin-configured active image provider (e.g. Cloudflare flux). Image
+            # prompts use the image model; everything else uses the chat model.
+            # No dependence on the chat LLM paying/calling tools, and no web-search
+            # detour first.
+            if _run_image_fastpath:
+                try:
+                    from src import image_providers as _ip
+                    _active_ip = _ip.get_active_provider()
+                    if _active_ip:
+                        from src.ai_interaction import do_generate_image as _dgi
+                        _img_model = (_active_ip.get("config", {}) or {}).get("model", "image")
+                        yield f'data: {json.dumps({"type": "model_info", "model": _img_model, "suffix": "Image"})}\n\n'
+                        yield f'data: {json.dumps({"type": "tool_start", "tool": "generate_image"})}\n\n'
+                        # For an edit follow-up, generate from the merged
+                        # (previous prompt + requested change) instead of the
+                        # bare follow-up text, so the new image keeps the subject
+                        # and only applies the change.
+                        _gen_prompt = _image_edit_prompt or message
+                        _img_res = await _dgi(_gen_prompt, session_id=session, owner=_user)
+                        if isinstance(_img_res, dict) and _img_res.get("image_url"):
+                            # NOTE: must be "tool_output" (not "tool_result") —
+                            # that is the event type the frontend chat renderer
+                            # listens on to place the inline image bubble. A
+                            # "tool_result" is silently ignored (image only
+                            # showed up in the gallery, never in the chat).
+                            _evt = {
+                                "type": "tool_output",
+                                "tool": "generate_image",
+                                "command": "",
+                                "output": "",
+                                "exit_code": 0,
+                                "image_url": _img_res["image_url"],
+                                "image_prompt": _img_res.get("image_prompt") or message,
+                                "image_model": _img_res.get("image_model") or _img_model,
+                                "image_size": _img_res.get("image_size"),
+                                "image_quality": _img_res.get("image_quality"),
+                                "image_id": _img_res.get("image_id"),
+                             }
+                            yield f'data: {json.dumps(_evt)}\n\n'
+                            # Persist the assistant turn so the inline image
+                            # survives a page reload. The chat renderer rebuilds
+                            # image bubbles from metadata.tool_events, so store
+                            # this tool_output event there (same shape the agent
+                            # loop persists). Without this the image only lived in
+                            # the SSE stream and vanished on refresh.
+                            #
+                            # ALSO record a textual note as the assistant content
+                            # so the NEXT turn's chat model (a different model than
+                            # the image model) can "see" that an image was made and
+                            # answer follow-ups like "what does this picture show?"
+                            # instead of denying it ever created one. The prompt
+                            # subject is the ground truth of what was drawn.
+                            _img_prompt_txt = (
+                                _img_res.get("image_prompt") or message or ""
+                            ).strip()
+                            if _img_prompt_txt:
+                                _img_note = (
+                                    f"[Generated image] I created an image from the "
+                                    f"prompt: \"{_img_prompt_txt}\". The image is shown "
+                                    f"above in this conversation. If asked about it, "
+                                    f"describe this image based on that prompt."
+                                )
+                            else:
+                                _img_note = (
+                                    "[Generated image] I created and displayed an "
+                                    "image above in this conversation."
+                                )
+                            try:
+                                save_assistant_response(
+                                    sess,
+                                    session_manager,
+                                    session,
+                                    _img_note,
+                                    {"model": _img_model, "requested_model": _img_model},
+                                    tool_events=[_evt],
+                                    incognito=incognito,
+                                )
+                            except Exception as _save_e:
+                                logger.warning(f"Failed to persist image turn: {_save_e}")
+                            _router_trace["image_fastpath"] = True
+                            _router_trace["intent_category"] = (
+                                _router_trace.get("intent_category") or "image"
+                            )
+                            _router_trace["model"] = _img_model
+                            _record_trace(exit_path="image_fastpath", outcome="ok")
+                            yield "data: [DONE]\n\n"
+                            _stream_set(session, status="done")
+                            _active_streams.pop(session, None)
+                            return
+                        else:
+                            _err = (_img_res or {}).get("error", "Image generation failed.") if isinstance(_img_res, dict) else "Image generation failed."
+                            yield f'data: {json.dumps({"type": "tool_output", "tool": "generate_image", "command": "", "output": _err, "exit_code": 1})}\n\n'
+                            _router_trace["image_fastpath"] = True
+                            _router_trace["model"] = _img_model
+                            _record_trace(exit_path="image_fastpath_error", outcome="error")
+                            yield "data: [DONE]\n\n"
+                            _stream_set(session, status="done")
+                            _active_streams.pop(session, None)
+                            return
+                    else:
+                        logger.warning("Image intent but no active image provider configured")
+                except Exception as _img_e:
+                    logger.warning(f"Image fast-path failed, falling through: {_img_e}")
 
             # Run research as a background task (survives page refresh)
             if effective_do_research:
@@ -1195,46 +1728,9 @@ def setup_chat_routes(
                 _model_info["character_name"] = ctx.preset.character_name
             yield f'data: {json.dumps(_model_info)}\n\n'
 
-            if _is_image_generation_session(sess, owner=_user):
-                from src.settings import get_setting
-                if tool_policy.blocks("generate_image"):
-                    _blocked_msg = tool_policy.reason_for("generate_image")
-                    yield f'data: {json.dumps({"delta": _blocked_msg})}\n\n'
-                    yield "data: [DONE]\n\n"
-                    _active_streams.pop(session, None)
-                    return
-                if not get_setting("image_gen_enabled", True):
-                    yield f'data: {json.dumps({"delta": "Image generation is disabled by the administrator."})}\n\n'
-                    yield "data: [DONE]\n\n"
-                    _active_streams.pop(session, None)
-                    return
-                from src.ai_interaction import do_generate_image
-                _user_msg = message or ""
-                yield f'data: {json.dumps({"type": "tool_start", "tool": "generate_image", "command": _user_msg[:100]})}\n\n'
-                yield ": heartbeat\n\n"
-                _img_result = await do_generate_image(f"{_user_msg}\n{sess.model}", session, owner=_user)
-                _img_output = _img_result.get("results", _img_result.get("error", ""))
-                _img_tool_data = {"type": "tool_output", "tool": "generate_image", "command": _user_msg[:100], "output": _img_output, "exit_code": 0 if "error" not in _img_result else 1}
-                for _k in ("image_url", "image_id", "image_prompt", "image_model", "image_size", "image_quality"):
-                    if _k in _img_result:
-                        _img_tool_data[_k] = _img_result[_k]
-                yield f'data: {json.dumps(_img_tool_data)}\n\n'
-                _desc = _img_result.get("results", _img_result.get("error", "Image generation complete"))
-                full_response = _desc
-                yield f'data: {json.dumps({"delta": _desc})}\n\n'
-                # Save to session history
-                if not incognito:
-                    _ev = {"round": 1, "tool": "generate_image", "command": _user_msg[:100], "output": _img_output, "exit_code": 0 if "error" not in _img_result else 1}
-                    for _ek in ("image_url", "image_id", "image_prompt", "image_model", "image_size", "image_quality"):
-                        if _img_result.get(_ek):
-                            _ev[_ek] = _img_result[_ek]
-                    sess.add_message(ChatMessage("assistant", full_response, metadata={"tool_events": [_ev], "model": sess.model}))
-                    session_manager.save_sessions()
-                yield f'data: {json.dumps({"type": "metrics", "data": {"total_time": 0}})}\n\n'
-                yield "data: [DONE]\n\n"
-                _active_streams.pop(session, None)
-                return
-            elif chat_mode == "chat":
+            # Image generation is otherwise handled by the generate_image tool
+            # inside the agent loop when the LLM decides the user asked for one.
+            if chat_mode == "chat":
                 _chat_start = time.time()
                 _answered_by = None  # set if the selected model failed and a fallback answered
                 _requested_model = sess.model
@@ -1376,6 +1872,14 @@ def setup_chat_routes(
                     raise
                 finally:
                     _active_streams.pop(session, None)
+                    _router_trace["model"] = (
+                        _actual_model or _answered_by or _requested_model
+                        or _router_trace.get("model")
+                    )
+                    if not _router_trace.get("exit_path"):
+                        _router_trace["exit_path"] = "chat"
+                    if not _router_trace.get("outcome"):
+                        _router_trace["outcome"] = "ok" if full_response else "empty"
             else:
                 # ── Agent mode: full agent loop with tools ──
                 _agent_rounds = 0
@@ -1405,6 +1909,11 @@ def setup_chat_routes(
                     _forced_tools = None
                     if _search_enabled:
                         _forced_tools = set(WEB_TOOL_NAMES)
+                    # A clear image request must ALWAYS have generate_image
+                    # available, even when tool-RAG retrieval times out or
+                    # returns only the always-available tools. Force it in.
+                    if _explicit_image_intent and not tool_policy.blocks("generate_image"):
+                        _forced_tools = (_forced_tools or set()) | {"generate_image"}
 
                     async for chunk in stream_agent_loop(
                         sess.endpoint_url,
@@ -1446,6 +1955,16 @@ def setup_chat_routes(
                                 elif data.get("type") == "web_sources":
                                     web_sources = data.get("data", [])
                                     yield chunk
+                                elif data.get("type") == "router_meta":
+                                    # Observability only (Tahap 2): capture which
+                                    # tools the agent loop selected. Not forwarded
+                                    # to the client (harmless if it were — unknown
+                                    # events are ignored), keeping the SSE contract
+                                    # unchanged for older frontends.
+                                    _sel = data.get("selected_tools")
+                                    if isinstance(_sel, list):
+                                        _router_trace["selected_tools"] = _sel
+                                    continue
                                 elif data.get("type") in (
                                     "tool_start", "tool_output", "agent_step",
                                     "doc_stream_open", "doc_stream_delta",
@@ -1545,15 +2064,45 @@ def setup_chat_routes(
                     raise
                 finally:
                     _active_streams.pop(session, None)
+                    _router_trace["agent_rounds"] = _agent_rounds
+                    _router_trace["tool_calls"] = _agent_tool_calls
+                    _router_trace["model"] = (
+                        _actual_model or _answered_by or _requested_model
+                        or _router_trace.get("model")
+                    )
+                    if not _router_trace.get("exit_path"):
+                        _router_trace["exit_path"] = _effective_mode
+                    if not _router_trace.get("outcome"):
+                        _router_trace["outcome"] = (
+                            "ok" if (full_response or (last_metrics or {}).get("tool_events"))
+                            else "empty"
+                        )
 
         async def _safe_stream() -> AsyncGenerator[str, None]:
             """Wrapper that guarantees _active_streams cleanup even if stream_with_save
             raises before reaching a mode-specific finally block."""
+            _err = None
             try:
                 async for chunk in stream_with_save():
                     yield chunk
+            except (asyncio.CancelledError, GeneratorExit):
+                # Client disconnected — still record the decision as cancelled.
+                _record_trace(exit_path="cancelled", outcome="cancelled")
+                raise
+            except Exception as _e:
+                _err = _e
+                _record_trace(exit_path="exception", outcome="error")
+                raise
             finally:
                 _active_streams.pop(session, None)
+                # Normal completion (no early _record_trace hit inside): record
+                # with the mode as the exit path. Idempotent — early-return paths
+                # already recorded and this becomes a no-op.
+                if _err is None:
+                    _record_trace(
+                        exit_path=(_router_trace.get("exit_path") or _effective_mode),
+                        outcome=(_router_trace.get("outcome") or "ok"),
+                    )
 
         # Compare panes are short-lived, single-shot generations whose sessions
         # exist only to drive that one pane — there's nothing to "resume" and
