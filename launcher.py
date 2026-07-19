@@ -67,7 +67,7 @@ if getattr(sys, 'frozen', False):
 
 
 def create_tray_image():
-    # Generate a beautiful 64x64 icon matching Odysseus brand red accent (#e06c75)
+    # Generate a beautiful 64x64 icon matching Aigenchain brand red accent (#e06c75)
     from PIL import Image, ImageDraw
     image = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
     dc = ImageDraw.Draw(image)

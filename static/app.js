@@ -1,5 +1,5 @@
 // ============================================
-// Odysseus UI — Main Application Orchestrator
+// Aigenchain UI — Main Application Orchestrator
 // ES6 module — entry point, no exports (wires all modules together)
 // ============================================
 import Storage from './js/storage.js';
@@ -66,8 +66,8 @@ function _submitChatFormDirect(form) {
 
 function _isForegroundChatBusy() {
   const sendBtn = document.querySelector('.send-btn');
-  return !!window.__odysseusChatBusy
-    || Date.now() < (window.__odysseusChatBusyUntil || 0)
+  return !!window.__aigenchainChatBusy
+    || Date.now() < (window.__aigenchainChatBusyUntil || 0)
     || !!document.querySelector('.send-btn[data-mode="streaming"], .send-btn.send-pending')
     || (sendBtn && (sendBtn.title || '').toLowerCase().includes('stop'));
 }
@@ -106,7 +106,7 @@ function _submitMobileQueuedInput(input) {
   if (chatModule && chatModule.queueStreamingComposerRequest && chatModule.queueStreamingComposerRequest()) {
     return true;
   }
-  window.__odysseusQueueStreamingSubmit = now;
+  window.__aigenchainQueueStreamingSubmit = now;
   const form = document.getElementById('chat-form');
   _submitChatFormDirect(form);
   return true;
@@ -210,7 +210,7 @@ async function _refreshDefaultChat() {
     const d = await (await fetch('/api/default-chat')).json();
     if (d && d.endpoint_url && d.model) {
       _defaultChat = d;
-      try { window.__odysseusDefaultChat = d; } catch (_) {}
+      try { window.__aigenchainDefaultChat = d; } catch (_) {}
       return d;
     }
   } catch (_) {}
@@ -1230,7 +1230,7 @@ function initializeEventListeners() {
   // click handler in emailInbox, sessionModule's loaded session list) are
   // still being wired up further down in this same function. Stash the
   // opener so it runs from sessionModule.loadSessions().finally() below.
-  if (_opener) window._odysseusRouteOpener = _opener;
+  if (_opener) window._aigenchainRouteOpener = _opener;
 
   // Archive browser tool button
   const toolLibraryBtn = el('tool-library-btn');
@@ -1478,7 +1478,7 @@ function initializeEventListeners() {
     modelSortDropdown.querySelectorAll('.sort-option').forEach(opt => {
       opt.addEventListener('click', () => {
         const mode = opt.dataset.sort;
-        Storage.set('odysseus-model-sort', mode);
+        Storage.set('aigenchain-model-sort', mode);
         if (modelsModule) modelsModule.refreshModels();
         modelSortDropdown.style.display = 'none';
         uiModule.showToast('Models sorted: ' + opt.textContent.trim().toLowerCase());
@@ -1810,7 +1810,7 @@ function initializeEventListeners() {
       // Delay tool glow-up for a staggered effect
       setTimeout(() => applyModeToToggles(mode), 500);
     }
-    window.__odysseusSetChatMode = setMode;
+    window.__aigenchainSetChatMode = setMode;
     agentBtn.addEventListener('click', () => {
       // Agent mode turns off research if active
       const resChk = el('research-toggle');
@@ -1828,7 +1828,7 @@ function initializeEventListeners() {
   })();
 
   // ── Tool splash explainer messages (shown first 2 times per tool) ──
-  const SPLASH_COUNT_KEY = 'odysseus-tool-splash-counts';
+  const SPLASH_COUNT_KEY = 'aigenchain-tool-splash-counts';
   const SPLASH_MAX = 2;
   const _toolSplashes = {
     web: { role: 'Web Search', text: 'Searches the web for relevant information to include in the response. Results are fetched and summarized before the AI answers.' },
@@ -2581,8 +2581,8 @@ function initializeEventListeners() {
         const _offIds = ['web-toggle', 'bash-toggle', 'research-toggle'];
         _offIds.forEach(id => { const c = el(id); if (c) c.checked = false; });
         ['web-toggle-btn', 'overflow-web-btn', 'bash-toggle-btn', 'overflow-shell-btn'].forEach(id => { const b = el(id); if (b) b.classList.remove('active'); });
-        if (typeof window.__odysseusSetChatMode === 'function') {
-          window.__odysseusSetChatMode('chat');
+        if (typeof window.__aigenchainSetChatMode === 'function') {
+          window.__aigenchainSetChatMode('chat');
         } else {
           const _ab = el('mode-agent-btn'), _cb = el('mode-chat-btn');
           if (_ab) {
@@ -2630,8 +2630,8 @@ function initializeEventListeners() {
           if (_ts[k] === false) delete _ts[k];
         });
         Storage.setJSON(Storage.KEYS.TOGGLES, _ts);
-        if (typeof window.__odysseusSetChatMode === 'function') {
-          window.__odysseusSetChatMode(_restoreMode === 'chat' ? 'chat' : 'agent');
+        if (typeof window.__aigenchainSetChatMode === 'function') {
+          window.__aigenchainSetChatMode(_restoreMode === 'chat' ? 'chat' : 'agent');
         }
         // Reapply the current mode's real defaults to the visible toggles
         const _curMode = (Storage.getJSON(Storage.KEYS.TOGGLES, {}) || {}).mode || 'chat';
@@ -2670,7 +2670,7 @@ function initializeEventListeners() {
   }
 
   // ── UI Visibility (Customize UI modal) ──
-  const UI_VIS_KEY = 'odysseus-ui-visibility';
+  const UI_VIS_KEY = 'aigenchain-ui-visibility';
 
   // Selector map: key → CSS selector(s) for targets
   const UI_VIS_MAP = {
@@ -2951,7 +2951,7 @@ function initializeEventListeners() {
 
   // Migrate old toolbar visibility key if present
   (function migrateOldToolbarVis() {
-    const OLD_KEY = 'odysseus-toolbar-visibility';
+    const OLD_KEY = 'aigenchain-toolbar-visibility';
     try {
       const old = Storage.getJSON(OLD_KEY, null);
       if (old && typeof old === 'object') {
@@ -3401,7 +3401,7 @@ function initializeEventListeners() {
   const textarea = el('message');
   if (textarea) {
     _syncMobileEnterKeyHint(textarea);
-    window.addEventListener('odysseus:chat-busy-change', () => _syncMobileEnterKeyHint(textarea));
+    window.addEventListener('aigenchain:chat-busy-change', () => _syncMobileEnterKeyHint(textarea));
     uiModule.autoResize(textarea);
     let previousTextareaValue = textarea.value || '';
     textarea.addEventListener('beforeinput', (e) => {
@@ -3448,7 +3448,7 @@ function initializeEventListeners() {
             if (chatModule && chatModule.queueStreamingComposerRequest && chatModule.queueStreamingComposerRequest()) {
               return;
             }
-            window.__odysseusQueueStreamingSubmit = Date.now();
+            window.__aigenchainQueueStreamingSubmit = Date.now();
           }
           _submitChatFormDirect(form);
         }
@@ -3647,12 +3647,12 @@ function initializeEventListeners() {
 // ============================================
 // INITIALIZATION ON PAGE LOAD
 // ============================================
-function startOdysseusApp() {
-  if (window.__odysseusAppStarted) return;
-  window.__odysseusAppStarted = true;
+function startAigenchainApp() {
+  if (window.__aigenchainAppStarted) return;
+  window.__aigenchainAppStarted = true;
   const _bumpChatPriority = (ms = 10000) => {
     try {
-      window.__odysseusChatBusyUntil = Math.max(window.__odysseusChatBusyUntil || 0, Date.now() + ms);
+      window.__aigenchainChatBusyUntil = Math.max(window.__aigenchainChatBusyUntil || 0, Date.now() + ms);
     } catch (_) {}
   };
   _bumpChatPriority(10000);
@@ -3705,7 +3705,7 @@ function startOdysseusApp() {
     documentModule.init(API_BASE);
     // Restore document panel if it was open before refresh
     const _curSession = sessionModule && sessionModule.getCurrentSessionId();
-    if (_curSession && localStorage.getItem('odysseus-doc-open-' + _curSession) === '1') {
+    if (_curSession && localStorage.getItem('aigenchain-doc-open-' + _curSession) === '1') {
       documentModule.loadSessionDocs(_curSession);
     }
   }  
@@ -3879,7 +3879,7 @@ function startOdysseusApp() {
   const _callIconActive = '<svg class="call-bars-anim" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="10" x2="4" y2="14"/><line x1="8" y1="6" x2="8" y2="18"/><line x1="12" y1="3" x2="12" y2="21"/><line x1="16" y1="6" x2="16" y2="18"/><line x1="20" y1="10" x2="20" y2="14"/></svg>';
 
   // Expose icons globally so chat.js updateSubmitButton can use them
-  window._odysseusBtnIcons = { send: _sendIcon, mic: _micIcon, stop: _stopIcon, newChat: _newChatIcon };
+  window._aigenchainBtnIcons = { send: _sendIcon, mic: _micIcon, stop: _stopIcon, newChat: _newChatIcon };
 
   function _isSttEnabled() {
     return voiceRecorderModule._sttProvider && voiceRecorderModule._sttProvider !== 'disabled';
@@ -3930,7 +3930,7 @@ function startOdysseusApp() {
   });
 
   // Hook called by callController to reflect call state on the Send button.
-  window._odysseusCallUI = function (active) {
+  window._aigenchainCallUI = function (active) {
     if (!sendBtn) return;
     if (active) {
       sendBtn.dataset.mode = 'call';
@@ -4083,7 +4083,7 @@ function startOdysseusApp() {
       const hasFiles = _hasAttachments();
 
       if (sendBtn.dataset.mode === 'streaming') {
-        if (hasText) window.__odysseusQueueStreamingSubmit = Date.now();
+        if (hasText) window.__aigenchainQueueStreamingSubmit = Date.now();
         handleSubmit(e);
         return;
       }
@@ -4140,7 +4140,7 @@ function startOdysseusApp() {
           if (chatModule && chatModule.queueStreamingComposerRequest && chatModule.queueStreamingComposerRequest()) {
             return;
           }
-          window.__odysseusQueueStreamingSubmit = Date.now();
+          window.__aigenchainQueueStreamingSubmit = Date.now();
         }
         _submitChatFormDirect(document.getElementById('chat-form'));
       }
@@ -4348,9 +4348,9 @@ function startOdysseusApp() {
         if (loader) { loader.style.opacity = '0'; setTimeout(() => loader.remove(), 300); }
         // Fire any URL route opener now that sessions + module wiring are
         // ready. Deferred from up top of init for exactly this reason.
-        if (window._odysseusRouteOpener) {
-          try { window._odysseusRouteOpener(); } catch (_) {}
-          window._odysseusRouteOpener = null;
+        if (window._aigenchainRouteOpener) {
+          try { window._aigenchainRouteOpener(); } catch (_) {}
+          window._aigenchainRouteOpener = null;
         }
       });
   } else {
@@ -4360,8 +4360,8 @@ function startOdysseusApp() {
   const runNonCriticalStartup = (fn, delay = 4000) => {
     let tries = 0;
     const run = () => {
-      const busy = !!window.__odysseusChatBusy
-        || Date.now() < (window.__odysseusChatBusyUntil || 0)
+      const busy = !!window.__aigenchainChatBusy
+        || Date.now() < (window.__aigenchainChatBusyUntil || 0)
         || !!document.querySelector('.send-btn[data-mode="streaming"], .send-btn.send-pending');
       if (busy && tries < 12) {
         tries += 1;
@@ -4526,7 +4526,7 @@ function startOdysseusApp() {
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', startOdysseusApp, { once: true });
+  document.addEventListener('DOMContentLoaded', startAigenchainApp, { once: true });
 } else {
-  startOdysseusApp();
+  startAigenchainApp();
 }

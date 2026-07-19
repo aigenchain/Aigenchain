@@ -1,5 +1,5 @@
 // static/js/callController.js
-// Real-time "Voice Call" mode for Odysseus — turn-based, hands-free conversation.
+// Real-time "Voice Call" mode for Aigenchain — turn-based, hands-free conversation.
 //
 // Loop:  LISTENING  ⇄  SPEAKING   (THINKING in between)
 //   LISTENING : mic open, browser STT transcribes live; VAD detects end of
@@ -56,7 +56,7 @@ let _ttsWaitIv = null;
 
 // The Call icon (idle + animated-active) now lives inside the Send button and is
 // owned by app.js (_callIcon / _callIconActive). This module only drives the call
-// logic + overlay and tells app.js when the call is active via window._odysseusCallUI.
+// logic + overlay and tells app.js when the call is active via window._aigenchainCallUI.
 
 // ── UI construction ──
 function buildUI() {
@@ -235,7 +235,7 @@ function setState(next, statusText) {
   state = next;
   if (statusText) setStatus(statusText);
   // Let app.js reflect the call state on the Send button (icon + active style).
-  if (window._odysseusCallUI) window._odysseusCallUI(next !== STATE.IDLE);
+  if (window._aigenchainCallUI) window._aigenchainCallUI(next !== STATE.IDLE);
 }
 
 function beginListening() {

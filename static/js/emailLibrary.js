@@ -95,7 +95,7 @@ function _applyTagFilterFromPill(tag) {
   });
 }
 
-document.addEventListener('odysseus:email-filter-tag', (e) => {
+document.addEventListener('aigenchain:email-filter-tag', (e) => {
   _applyTagFilterFromPill(e.detail?.tag);
 });
 
@@ -179,7 +179,7 @@ function _getActiveEmailContext() {
 
 // Frontend reads via the global so chat.js doesn't need a separate import
 // path (emailLibrary loads lazily in some entry points).
-try { window.__odysseusGetActiveEmailContext = _getActiveEmailContext; } catch (_) {}
+try { window.__aigenchainGetActiveEmailContext = _getActiveEmailContext; } catch (_) {}
 
 const _COPY_EMAIL_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 
@@ -537,7 +537,7 @@ async function _loadEmailReminderBellVisibility() {
 }
 // Live-update the bell when the reminder channel changes in Settings,
 // so the user doesn't have to reopen Email to see the change apply.
-window.addEventListener('odysseus-reminder-channel-changed', (e) => {
+window.addEventListener('aigenchain-reminder-channel-changed', (e) => {
   const ch = e?.detail?.channel;
   _syncEmailReminderBellVisibility(ch === 'email');
 });
@@ -985,8 +985,8 @@ function _loadEmailsFresh() {
 
 function _isChatInteractionBusy() {
   try {
-    if (window.__odysseusChatBusy) return true;
-    const until = Number(window.__odysseusChatBusyUntil || 0);
+    if (window.__aigenchainChatBusy) return true;
+    const until = Number(window.__aigenchainChatBusyUntil || 0);
     return until > Date.now();
   } catch (_) {
     return false;
@@ -1119,7 +1119,7 @@ function _libCacheWriteBack() {
 // Expose the active account id to other modules (document.js uses this when sending).
 // Simple global rather than cross-module import to keep coupling minimal.
 function _publishActiveAccount() {
-  try { window.__odysseusActiveEmailAccount = state._libAccountId || null; } catch (_) {}
+  try { window.__aigenchainActiveEmailAccount = state._libAccountId || null; } catch (_) {}
   // Publish the active account's own address so reply-all can exclude us from
   // the recipient list. This global was read in emailInbox.js but never set.
   try {
@@ -1436,11 +1436,11 @@ export function openEmailLibrary(opts = {}) {
     tagsToggle.setAttribute('aria-pressed', String(!!state._libShowTags));
     tagsToggle.addEventListener('click', () => {
       state._libShowTags = !state._libShowTags;
-      localStorage.setItem('odysseus.email.showTags', state._libShowTags ? '1' : '0');
+      localStorage.setItem('aigenchain.email.showTags', state._libShowTags ? '1' : '0');
       tagsToggle.classList.toggle('active', !!state._libShowTags);
       tagsToggle.setAttribute('aria-pressed', String(!!state._libShowTags));
       _renderGrid();
-      document.dispatchEvent(new CustomEvent('odysseus:email-tags-toggle', { detail: { show: state._libShowTags } }));
+      document.dispatchEvent(new CustomEvent('aigenchain:email-tags-toggle', { detail: { show: state._libShowTags } }));
     });
   }
   document.getElementById('email-reminders-clear-btn')?.addEventListener('click', async () => {
@@ -1451,7 +1451,7 @@ export function openEmailLibrary(opts = {}) {
     });
     if (!ok) return;
     try {
-      const res = await fetch(`${API_BASE}/api/email/odysseus/reminders?permanent=1${_acct()}`, {
+      const res = await fetch(`${API_BASE}/api/email/aigenchain/reminders?permanent=1${_acct()}`, {
         method: 'DELETE',
         credentials: 'same-origin',
       });
@@ -4202,7 +4202,7 @@ async function _toggleCardPreview(card, em) {
 // occasionally splits a single reply into two bogus "turns" by treating a
 // signature/disclaimer as its own message), the user can flip this off to
 // fall back to plain rendering. Survives reloads.
-const _BUBBLES_DISABLED_KEY = 'odysseus.email.bubblesDisabled';
+const _BUBBLES_DISABLED_KEY = 'aigenchain.email.bubblesDisabled';
 // Threaded chat-bubble email view is DISABLED for now — too buggy to
 // ship. Force plain-text rendering everywhere by always returning true.
 // Re-enable by restoring the localStorage-backed body + the toggle
@@ -4974,7 +4974,7 @@ function _foldQuotedReplies(html) {
 // Global preference: AI summary panels stay collapsed across every email
 // once the user folds one, and stay expanded once they unfold. Stored in
 // localStorage so the choice survives reloads.
-const _SUMMARY_COLLAPSED_KEY = 'odysseus.email.summaryCollapsed';
+const _SUMMARY_COLLAPSED_KEY = 'aigenchain.email.summaryCollapsed';
 function _summaryCollapsedPref() {
   try { return localStorage.getItem(_SUMMARY_COLLAPSED_KEY) === '1'; } catch { return false; }
 }

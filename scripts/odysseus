@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""odysseus — one entrypoint for every odysseus-* CLI.
+"""aigenchain — one entrypoint for every aigenchain-* CLI.
 
-Discovers `scripts/odysseus-<name>` siblings and dispatches to them, the
+Discovers `scripts/aigenchain-<name>` siblings and dispatches to them, the
 same way `git` finds `git-foo`. Pure passthrough: any flags after the
-subcommand name are forwarded as-is, so `odysseus mail list --pretty`
-behaves exactly like `odysseus-mail list --pretty`.
+subcommand name are forwarded as-is, so `aigenchain mail list --pretty`
+behaves exactly like `aigenchain-mail list --pretty`.
 
-    odysseus                       # list every subcommand + short help
-    odysseus <name>                # run odysseus-<name>
-    odysseus <name> <args...>      # run odysseus-<name> <args...>
-    odysseus help                  # alias for `odysseus` (the listing)
-    odysseus help <name>           # show the subcommand's own --help
-    odysseus --version             # print version
+    aigenchain                       # list every subcommand + short help
+    aigenchain <name>                # run aigenchain-<name>
+    aigenchain <name> <args...>      # run aigenchain-<name> <args...>
+    aigenchain help                  # alias for `aigenchain` (the listing)
+    aigenchain help <name>           # show the subcommand's own --help
+    aigenchain --version             # print version
 
 Designed to live in `scripts/`. Symlink it onto `$PATH` (`ln -s
-$PWD/scripts/odysseus ~/.local/bin/odysseus`) to use it without typing
+$PWD/scripts/aigenchain ~/.local/bin/aigenchain`) to use it without typing
 the full path.
 """
 from __future__ import annotations
@@ -31,15 +31,15 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 
 
 def _list_subcommands() -> list[Path]:
-    """Find every executable `odysseus-*` next to this file (excluding
+    """Find every executable `aigenchain-*` next to this file (excluding
     the dispatcher itself + any .bak / .pre-* migration leftovers)."""
     out = []
     for p in sorted(SCRIPTS_DIR.iterdir()):
         if not p.is_file():
             continue
-        if p.name == "odysseus":
+        if p.name == "aigenchain":
             continue
-        if not p.name.startswith("odysseus-"):
+        if not p.name.startswith("aigenchain-"):
             continue
         if any(p.name.endswith(suf) for suf in (".bak", ".pre-cli-refactor", ".pyc")):
             continue
@@ -64,7 +64,7 @@ def _short_help(path: Path) -> str:
         return ""
     # First non-blank line, strip the leading "name — " noise.
     first = next((ln for ln in body.splitlines() if ln.strip()), "")
-    first = re.sub(r"^odysseus-\w+\s*—\s*", "", first).strip()
+    first = re.sub(r"^aigenchain-\w+\s*—\s*", "", first).strip()
     return first
 
 
@@ -73,18 +73,18 @@ def _is_runnable_subcommand(path: Path) -> bool:
 
 
 def _print_listing() -> None:
-    """`odysseus` with no args (or `odysseus help`) — print the table."""
-    sys.stdout.write(f"odysseus {VERSION} — every feature, on the shell.\n\n")
-    sys.stdout.write("Usage:  odysseus <subcommand> [args...]\n\n")
+    """`aigenchain` with no args (or `aigenchain help`) — print the table."""
+    sys.stdout.write(f"aigenchain {VERSION} — every feature, on the shell.\n\n")
+    sys.stdout.write("Usage:  aigenchain <subcommand> [args...]\n\n")
     sys.stdout.write("Available subcommands:\n")
     subs = _list_subcommands()
-    width = max((len(p.name[len("odysseus-"):]) for p in subs), default=10)
+    width = max((len(p.name[len("aigenchain-"):]) for p in subs), default=10)
     for p in subs:
-        name = p.name[len("odysseus-"):]
+        name = p.name[len("aigenchain-"):]
         desc = _short_help(p)
         sys.stdout.write(f"  {name:<{width + 2}}{desc}\n")
     sys.stdout.write(
-        "\nRun `odysseus help <subcommand>` for that tool's own --help.\n"
+        "\nRun `aigenchain help <subcommand>` for that tool's own --help.\n"
     )
 
 
@@ -96,27 +96,27 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if argv[0] in ("-v", "--version"):
-        sys.stdout.write(f"odysseus {VERSION}\n")
+        sys.stdout.write(f"aigenchain {VERSION}\n")
         return 0
 
     if argv[0] == "help":
-        # `odysseus help foo` → `odysseus-foo --help`
+        # `aigenchain help foo` → `aigenchain-foo --help`
         if len(argv) < 2:
             _print_listing()
             return 0
-        sub = SCRIPTS_DIR / f"odysseus-{argv[1]}"
+        sub = SCRIPTS_DIR / f"aigenchain-{argv[1]}"
         if not _is_runnable_subcommand(sub):
-            sys.stderr.write(f"odysseus: unknown subcommand {argv[1]!r}\n")
+            sys.stderr.write(f"aigenchain: unknown subcommand {argv[1]!r}\n")
             return 1
         return subprocess.call([str(sub), "--help"])
 
-    # `odysseus foo ...` → exec `odysseus-foo ...` under the project venv.
+    # `aigenchain foo ...` → exec `aigenchain-foo ...` under the project venv.
     name = argv[0]
-    sub = SCRIPTS_DIR / f"odysseus-{name}"
+    sub = SCRIPTS_DIR / f"aigenchain-{name}"
     if not _is_runnable_subcommand(sub):
         sys.stderr.write(
-            f"odysseus: unknown subcommand {name!r}. "
-            f"Try `odysseus help` to see available ones.\n"
+            f"aigenchain: unknown subcommand {name!r}. "
+            f"Try `aigenchain help` to see available ones.\n"
         )
         return 1
     # Run the subcommand with the project's venv Python so dependencies

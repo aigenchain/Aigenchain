@@ -126,7 +126,7 @@ def test_english_stable_who_what_stays_plain_chat():
 
 def test_explanatory_calendar_questions_stay_plain_chat():
     assert not message_needs_tools("How do I add an entry to my calendar?")
-    assert not message_needs_tools("What about the built-in Odysseus calendar, is that linked to email?")
+    assert not message_needs_tools("What about the built-in Aigenchain calendar, is that linked to email?")
     assert not message_needs_tools("Can you explain how calendar reminders work?")
     intent = classify_tool_intent("How do I add an entry to my calendar?")
     assert not intent.needs_tools

@@ -241,7 +241,7 @@ function _formatServeCmdPreview(cmd) {
     const homeMatch = raw.match(/((?:\/Users|\/home)\/[^/\s'"]+)/);
     const shortName = modelMatch?.[2]?.split('/').pop();
     if (homeMatch && shortName) {
-      const shimPath = `${homeMatch[1]}/.cache/odysseus/mlx-shims/${shortName}`;
+      const shimPath = `${homeMatch[1]}/.cache/aigenchain/mlx-shims/${shortName}`;
       raw = raw.replace(
         /--model\s+(['"]?)mlx-community\/[^'"\s]*deepseek-v4[^'"\s]*\1/i,
         `--model '${shimPath}'`
@@ -292,7 +292,7 @@ function _formatServeCmdPreview(cmd) {
   }).join('\n');
   if (mlxDeepSeekV4Compat) {
     return [
-      '# Odysseus runtime compatibility: using sanitized MLX DeepSeek-V4 shim.',
+      '# Aigenchain runtime compatibility: using sanitized MLX DeepSeek-V4 shim.',
       formatted,
     ].join('\n');
   }
@@ -2297,7 +2297,7 @@ function _rerenderCachedModels() {
       }
 
       // Saved-configs dropdown. Rebuilt each open (and after delete) so it always
-      // reflects the stored presets. Standard Odysseus .dropdown look, positioned
+      // reflects the stored presets. Standard Aigenchain .dropdown look, positioned
       // fixed at the toggle and right-aligned to it.
       function _showSavedConfigMenu(anchor) {
         document.querySelectorAll('.cookbook-saved-menu').forEach(d => { if (typeof d._dismiss === 'function') d._dismiss(); else d.remove(); });

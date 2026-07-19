@@ -83,8 +83,8 @@ function _resetRecordingUI() {
   if (micBtn) {
     micBtn.classList.remove('recording', 'silence-near');
     micBtn.title = 'Record voice';
-    if (window._odysseusBtnIcons && window._odysseusBtnIcons.mic) {
-      micBtn.innerHTML = window._odysseusBtnIcons.mic;
+    if (window._aigenchainBtnIcons && window._aigenchainBtnIcons.mic) {
+      micBtn.innerHTML = window._aigenchainBtnIcons.mic;
     }
   }
   if (window._updateSendBtnIcon) {

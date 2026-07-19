@@ -1947,8 +1947,8 @@ function initAppearance() {
   modalEl.querySelectorAll('[data-privacy-key]').forEach(function(chk) {
     chk.addEventListener('change', function() {
       if (chk.dataset.privacyKey !== 'sensitive-blur') return;
-      localStorage.setItem('odysseus-sensitive-blur', chk.checked ? 'on' : 'off');
-      window.dispatchEvent(new CustomEvent('odysseus-sensitive-blur-change', {
+      localStorage.setItem('aigenchain-sensitive-blur', chk.checked ? 'on' : 'off');
+      window.dispatchEvent(new CustomEvent('aigenchain-sensitive-blur-change', {
         detail: { enabled: chk.checked }
       }));
     });
@@ -1986,7 +1986,7 @@ function syncAppearanceCheckboxes() {
 
 function syncPrivacyCheckboxes() {
   modalEl.querySelectorAll('[data-privacy-key="sensitive-blur"]').forEach(function(chk) {
-    chk.checked = localStorage.getItem('odysseus-sensitive-blur') === 'on';
+    chk.checked = localStorage.getItem('aigenchain-sensitive-blur') === 'on';
   });
 }
 
@@ -2278,7 +2278,7 @@ async function initShortcuts() {
         body: JSON.stringify({ keybinds }),
       });
       // Update global keybinds so they take effect immediately
-      window._odysseusKeybinds = keybinds;
+      window._aigenchainKeybinds = keybinds;
       if (uiModule && uiModule.showToast) uiModule.showToast('Shortcut saved');
     } catch (e) {
       console.error('Failed to save keybinds:', e);
@@ -2467,12 +2467,12 @@ function initAccount() {
       // SECURITY: wipe all client-side state on logout so the next user that
       // signs in on this browser doesn't inherit the previous account's
       // session id, last-used model, draft chat input, or any cached lists.
-      // Keep "odysseus-last-user" so the login form remembers the username
+      // Keep "aigenchain-last-user" so the login form remembers the username
       // (if "Remember me" was on). Without this the chat composer pre-loaded
       // the previous user's last model into a fresh session, which read as
       // cross-account leakage.
       try {
-        const _keepKeys = new Set(['odysseus-last-user']);
+        const _keepKeys = new Set(['aigenchain-last-user']);
         const _toRemove = [];
         for (let i = 0; i < localStorage.length; i++) {
           const k = localStorage.key(i);
@@ -2519,7 +2519,7 @@ function initAll() {
 
 function notifyIntegrationsChanged() {
   try {
-    window.dispatchEvent(new CustomEvent('odysseus-integrations-changed'));
+    window.dispatchEvent(new CustomEvent('aigenchain-integrations-changed'));
   } catch (_) {}
 }
 
@@ -2756,7 +2756,7 @@ async function initReminderSettings() {
   applyReminderChannelAvailability();
   if (!channelSel.dataset.integrationRefreshWired) {
     channelSel.dataset.integrationRefreshWired = '1';
-    window.addEventListener('odysseus-integrations-changed', () => {
+    window.addEventListener('aigenchain-integrations-changed', () => {
       refreshReminderChannelAvailability().catch(e => console.warn('Failed to refresh reminder channels', e));
     });
   }
@@ -2854,7 +2854,7 @@ async function initReminderSettings() {
     save({ reminder_channel: channelSel.value });
     // Email reminder bell visibility tracks this — broadcast so the
     // email library can re-evaluate without waiting for a re-open.
-    try { window.dispatchEvent(new CustomEvent('odysseus-reminder-channel-changed', { detail: { channel: channelSel.value } })); } catch (_) {}
+    try { window.dispatchEvent(new CustomEvent('aigenchain-reminder-channel-changed', { detail: { channel: channelSel.value } })); } catch (_) {}
   });
   if (emailToIn) {
     let emailDebounce;
@@ -3279,7 +3279,7 @@ async function initEmailSettings() {
   const root = el('settings-modal');
   if (!root || !root.querySelector('[data-settings-panel="email"]')) return;
 
-  const styleKey = 'odysseus-email-writing-style';
+  const styleKey = 'aigenchain-email-writing-style';
   const styleEl = el('set-email-style');
 
   // The account/CardDAV config endpoints can be slow when remote mail servers
@@ -3683,11 +3683,11 @@ const AGENT_CONFIGS = {
     defaultName: 'Codex Agent',
     pluginPath: '/api/codex/plugin.zip',
     setupDescription: 'Downloads a plugin bundle and registers it.',
-    buildSetup: (origin, token) => `export ODYSSEUS_URL=${origin}
-export ODYSSEUS_API_TOKEN='${token}'
+    buildSetup: (origin, token) => `export AIGENCHAIN_URL=${origin}
+export AIGENCHAIN_API_TOKEN='${token}'
 mkdir -p ~/plugins
-curl -fsSL -H "Authorization: Bearer $ODYSSEUS_API_TOKEN" "$ODYSSEUS_URL/api/codex/plugin.zip" -o /tmp/odysseus-codex-plugin.zip
-python3 -m zipfile -e /tmp/odysseus-codex-plugin.zip ~/plugins
+curl -fsSL -H "Authorization: Bearer $AIGENCHAIN_API_TOKEN" "$AIGENCHAIN_URL/api/codex/plugin.zip" -o /tmp/aigenchain-codex-plugin.zip
+python3 -m zipfile -e /tmp/aigenchain-codex-plugin.zip ~/plugins
 python3 - <<'PY'
 import json
 from pathlib import Path
@@ -3703,16 +3703,16 @@ data.setdefault("name", "personal")
 data.setdefault("interface", {}).setdefault("displayName", "Personal")
 plugins = data.setdefault("plugins", [])
 entry = {
-    "name": "odysseus",
-    "source": {"source": "local", "path": "./plugins/odysseus"},
+    "name": "aigenchain",
+    "source": {"source": "local", "path": "./plugins/aigenchain"},
     "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
     "category": "Productivity",
 }
-data["plugins"] = [item for item in plugins if item.get("name") != "odysseus"] + [entry]
+data["plugins"] = [item for item in plugins if item.get("name") != "aigenchain"] + [entry]
 p.write_text(json.dumps(data, indent=2) + "\\n")
 PY
-codex plugin add odysseus@personal
-python3 ~/plugins/odysseus/scripts/odysseus_api.py capabilities`,
+codex plugin add aigenchain@personal
+python3 ~/plugins/aigenchain/scripts/aigenchain_api.py capabilities`,
   },
   claude: {
     label: 'Claude Agent',
@@ -3721,12 +3721,12 @@ python3 ~/plugins/odysseus/scripts/odysseus_api.py capabilities`,
     defaultName: 'Claude Agent',
     pluginPath: '/api/claude/plugin.zip',
     setupDescription: 'Downloads a plugin bundle and registers it.',
-    buildSetup: (origin, token) => `export ODYSSEUS_URL=${origin}
-export ODYSSEUS_API_TOKEN='${token}'
+    buildSetup: (origin, token) => `export AIGENCHAIN_URL=${origin}
+export AIGENCHAIN_API_TOKEN='${token}'
 mkdir -p ~/.claude
-curl -fsSL -H "Authorization: Bearer $ODYSSEUS_API_TOKEN" "$ODYSSEUS_URL/api/claude/plugin.zip" -o /tmp/odysseus-claude-skill.zip
-python3 -m zipfile -e /tmp/odysseus-claude-skill.zip ~/.claude/
-python3 ~/.claude/skills/odysseus/scripts/odysseus_api.py capabilities`,
+curl -fsSL -H "Authorization: Bearer $AIGENCHAIN_API_TOKEN" "$AIGENCHAIN_URL/api/claude/plugin.zip" -o /tmp/aigenchain-claude-skill.zip
+python3 -m zipfile -e /tmp/aigenchain-claude-skill.zip ~/.claude/
+python3 ~/.claude/skills/aigenchain/scripts/aigenchain_api.py capabilities`,
   },
 };
 
@@ -4345,7 +4345,7 @@ async function initUnifiedIntegrations() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = format === 'csv' ? 'odysseus-contacts.csv' : 'odysseus-contacts.vcf';
+        a.download = format === 'csv' ? 'aigenchain-contacts.csv' : 'aigenchain-contacts.vcf';
         document.body.appendChild(a);
         a.click();
         a.remove();

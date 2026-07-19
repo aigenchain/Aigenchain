@@ -239,7 +239,7 @@ def _package_pip_update_status(
 
     if pkg.get("kind") == "system" or not pkg.get("pip"):
         return PackageUpdateStatus(
-            False, "Update this system dependency outside Odysseus."
+            False, "Update this system dependency outside Aigenchain."
         )
 
     name = pkg.get("name")
@@ -262,7 +262,7 @@ def _package_pip_update_status(
     if name == "vllm" and binaries.get("vllm") and not dists.get("vllm"):
         return PackageUpdateStatus(
             False,
-            "Using a vLLM CLI on PATH without Python package metadata; update it outside Odysseus.",
+            "Using a vLLM CLI on PATH without Python package metadata; update it outside Aigenchain.",
         )
 
     return PackageUpdateStatus(
@@ -396,7 +396,7 @@ def _find_line_break(buf):
 EXEC_TIMEOUT = 30  # seconds — shorter than agent's 60s
 STREAM_TIMEOUT = 120  # default for short commands
 MAX_OUTPUT = 200_000  # truncate limit
-TMUX_LOG_DIR = Path(tempfile.gettempdir()) / "odysseus-tmux"
+TMUX_LOG_DIR = Path(tempfile.gettempdir()) / "aigenchain-tmux"
 PTY_UNSUPPORTED_ERROR = "pty_unsupported"
 
 
@@ -656,10 +656,10 @@ async def _generate_tmux(cmd: str, request: Request):
     script_path = TMUX_LOG_DIR / f"{session_id}.sh"
     script_path.write_text(
         f"#!/bin/bash\n"
-        f'ODYSSEUS_USER_SHELL="${{SHELL:-}}"\n'
-        f'if [ -n "$ODYSSEUS_USER_SHELL" ] && [ -x "$ODYSSEUS_USER_SHELL" ]; then\n'
-        f'  ODYSSEUS_USER_PATH="$("$ODYSSEUS_USER_SHELL" -ic \'printf "__ODYSSEUS_PATH__%s\\n" "$PATH"\' 2>/dev/null | sed -n \'s/^__ODYSSEUS_PATH__//p\' | tail -n 1 || true)"\n'
-        f'  if [ -n "$ODYSSEUS_USER_PATH" ]; then export PATH="$ODYSSEUS_USER_PATH:$PATH"; fi\n'
+        f'AIGENCHAIN_USER_SHELL="${{SHELL:-}}"\n'
+        f'if [ -n "$AIGENCHAIN_USER_SHELL" ] && [ -x "$AIGENCHAIN_USER_SHELL" ]; then\n'
+        f'  AIGENCHAIN_USER_PATH="$("$AIGENCHAIN_USER_SHELL" -ic \'printf "__AIGENCHAIN_PATH__%s\\n" "$PATH"\' 2>/dev/null | sed -n \'s/^__AIGENCHAIN_PATH__//p\' | tail -n 1 || true)"\n'
+        f'  if [ -n "$AIGENCHAIN_USER_PATH" ]; then export PATH="$AIGENCHAIN_USER_PATH:$PATH"; fi\n'
         f"fi\n"
         f"{cmd} 2>&1 | tee '{log_path}'\n"
         f"EC=${{PIPESTATUS[0]}}\n"

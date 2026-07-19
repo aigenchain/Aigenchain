@@ -1,5 +1,5 @@
 /* ============================================ */
-/* Odysseus UI — Consolidated Stylesheet        */
+/* Aigenchain UI — Consolidated Stylesheet        */
 /* ============================================ */
 
 
@@ -6270,7 +6270,7 @@ body.bg-pattern-sparkles {
     /* (legacy toolbar-toggle styles removed — now using .vis-* classes) */
 
     /* Demo highlight pulse */
-    .odysseus-highlight {
+    .aigenchain-highlight {
       outline: 2px solid var(--accent, var(--red)) !important;
       outline-offset: 1px;
       box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent, var(--red)) 18%, transparent);
@@ -6397,7 +6397,7 @@ body.bg-pattern-sparkles {
     @media (prefers-reduced-motion: reduce) {
       .th-cursor, .th-modal-group, .th-zone { animation: none !important; }
     }
-    .odysseus-hl-label {
+    .aigenchain-hl-label {
       position: absolute;
       top: -22px;
       left: 8px;
@@ -23807,7 +23807,7 @@ body.gallery-selecting .gallery-dl-btn,
 
 /* Welcome name — left-to-right wipe with a touch of horizontal stretch.
    Fires on initial render via the .welcome-name rule; restarts on Nobody⇄
-   Odysseus toggle via JS reflow trick. */
+   Aigenchain toggle via JS reflow trick. */
 .welcome-name {
   transform-origin: left center;
   animation: welcome-name-reveal 0.55s cubic-bezier(0.34, 1.32, 0.55, 1) both;
@@ -33139,7 +33139,7 @@ body.doc-find-active mark.doc-find-mark.current {
 }
 .email-compose-chip .compose-chip-remove:hover { opacity: 1; color: var(--red, #e55); }
 
-.email-odysseus-attach-menu {
+.email-aigenchain-attach-menu {
   position: fixed;
   z-index: 10050;
   width: 300px;
@@ -33153,7 +33153,7 @@ body.doc-find-active mark.doc-find-mark.current {
   box-shadow: 0 12px 30px rgba(0,0,0,0.28);
   overflow: hidden;
 }
-.email-odysseus-attach-local {
+.email-aigenchain-attach-local {
   width: 100%;
   height: 30px;
   display: flex;
@@ -33168,17 +33168,17 @@ body.doc-find-active mark.doc-find-mark.current {
   font-size: 11px;
   cursor: pointer;
 }
-.email-odysseus-attach-local:hover {
+.email-aigenchain-attach-local:hover {
   background: color-mix(in srgb, var(--accent-primary, var(--red)) 16%, transparent);
   border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 55%, var(--border));
 }
-.email-odysseus-attach-tabs {
+.email-aigenchain-attach-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 5px;
   margin: 7px 0;
 }
-.email-odysseus-attach-tabs button {
+.email-aigenchain-attach-tabs button {
   height: 26px;
   display: inline-flex;
   align-items: center;
@@ -33193,16 +33193,16 @@ body.doc-find-active mark.doc-find-mark.current {
   font-size: 11px;
   cursor: pointer;
 }
-.email-odysseus-attach-tabs button.active {
+.email-aigenchain-attach-tabs button.active {
   opacity: 1;
   color: var(--accent-primary, var(--red));
   border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 45%, var(--border));
   background: color-mix(in srgb, var(--accent-primary, var(--red)) 8%, transparent);
 }
-.email-odysseus-attach-tabs button svg {
+.email-aigenchain-attach-tabs button svg {
   flex-shrink: 0;
 }
-.email-odysseus-attach-search-wrap {
+.email-aigenchain-attach-search-wrap {
   height: 28px;
   display: flex;
   align-items: center;
@@ -33214,12 +33214,12 @@ body.doc-find-active mark.doc-find-mark.current {
   background: color-mix(in srgb, var(--fg) 3%, transparent);
   color: color-mix(in srgb, var(--fg) 48%, transparent);
 }
-.email-odysseus-attach-search-wrap:focus-within {
+.email-aigenchain-attach-search-wrap:focus-within {
   border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 45%, var(--border));
   color: var(--accent-primary, var(--red));
   background: color-mix(in srgb, var(--accent-primary, var(--red)) 6%, transparent);
 }
-.email-odysseus-attach-search {
+.email-aigenchain-attach-search {
   min-width: 0;
   flex: 1;
   border: 0;
@@ -33229,17 +33229,17 @@ body.doc-find-active mark.doc-find-mark.current {
   font: inherit;
   font-size: 11px;
 }
-.email-odysseus-attach-search::placeholder {
+.email-aigenchain-attach-search::placeholder {
   color: color-mix(in srgb, var(--fg) 38%, transparent);
 }
-.email-odysseus-attach-list {
+.email-aigenchain-attach-list {
   max-height: 320px;
   overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
-.email-odysseus-attach-row {
+.email-aigenchain-attach-row {
   width: 100%;
   min-height: 38px;
   display: flex;
@@ -33254,15 +33254,15 @@ body.doc-find-active mark.doc-find-mark.current {
   font: inherit;
   cursor: pointer;
 }
-.email-odysseus-attach-row:hover {
+.email-aigenchain-attach-row:hover {
   background: var(--hover-bg, rgba(255,255,255,0.06));
   border-color: var(--border);
 }
-.email-odysseus-attach-row.is-selected {
+.email-aigenchain-attach-row.is-selected {
   background: color-mix(in srgb, var(--accent-primary, var(--red)) 10%, transparent);
   border-color: color-mix(in srgb, var(--accent-primary, var(--red)) 45%, var(--border));
 }
-.email-odysseus-attach-dot {
+.email-aigenchain-attach-dot {
   width: 8px;
   height: 8px;
   flex: 0 0 auto;
@@ -33271,13 +33271,13 @@ body.doc-find-active mark.doc-find-mark.current {
   border-radius: 50%;
   background: color-mix(in srgb, var(--fg) 4%, transparent);
 }
-.email-odysseus-attach-row.is-selected .email-odysseus-attach-dot {
+.email-aigenchain-attach-row.is-selected .email-aigenchain-attach-dot {
   border-color: var(--accent-primary, var(--red));
   background: var(--accent-primary, var(--red));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-primary, var(--red)) 18%, transparent);
 }
-.email-odysseus-attach-icon,
-.email-odysseus-attach-thumb {
+.email-aigenchain-attach-icon,
+.email-aigenchain-attach-thumb {
   width: 28px;
   height: 28px;
   flex: 0 0 auto;
@@ -33288,42 +33288,42 @@ body.doc-find-active mark.doc-find-mark.current {
   background: color-mix(in srgb, var(--fg) 7%, transparent);
   overflow: hidden;
 }
-.email-odysseus-attach-thumb img {
+.email-aigenchain-attach-thumb img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
-.email-odysseus-attach-main {
+.email-aigenchain-attach-main {
   min-width: 0;
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-.email-odysseus-attach-title,
-.email-odysseus-attach-meta {
+.email-aigenchain-attach-title,
+.email-aigenchain-attach-meta {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.email-odysseus-attach-title {
+.email-aigenchain-attach-title {
   font-size: 11px;
   line-height: 1.2;
 }
-.email-odysseus-attach-meta {
+.email-aigenchain-attach-meta {
   font-size: 10px;
   line-height: 1.15;
   opacity: 0.52;
 }
-.email-odysseus-attach-empty {
+.email-aigenchain-attach-empty {
   padding: 14px 8px;
   color: var(--muted, #888);
   font-size: 11px;
   text-align: center;
 }
-.email-odysseus-attach-actions {
+.email-aigenchain-attach-actions {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -33334,13 +33334,13 @@ body.doc-find-active mark.doc-find-mark.current {
   position: sticky;
   bottom: 0;
 }
-.email-odysseus-attach-count {
+.email-aigenchain-attach-count {
   flex: 1;
   min-width: 0;
   color: var(--muted, #888);
   font-size: 11px;
 }
-.email-odysseus-attach-selected {
+.email-aigenchain-attach-selected {
   height: 28px;
   min-width: 72px;
   padding: 0 12px;
@@ -33356,19 +33356,19 @@ body.doc-find-active mark.doc-find-mark.current {
   font-size: 11px;
   cursor: pointer;
 }
-.email-odysseus-attach-selected svg {
+.email-aigenchain-attach-selected svg {
   flex-shrink: 0;
 }
-.email-odysseus-attach-selected:disabled {
+.email-aigenchain-attach-selected:disabled {
   opacity: 0.45;
   cursor: default;
 }
-.email-odysseus-attach-selected.is-loading {
+.email-aigenchain-attach-selected.is-loading {
   opacity: 0.72;
   pointer-events: none;
 }
 @media (max-width: 768px) {
-  .email-odysseus-attach-menu {
+  .email-aigenchain-attach-menu {
     left: 8px !important;
     right: 8px;
     bottom: 8px;
@@ -33376,7 +33376,7 @@ body.doc-find-active mark.doc-find-mark.current {
     width: auto;
     max-height: 58vh;
   }
-  .email-odysseus-attach-list {
+  .email-aigenchain-attach-list {
     max-height: calc(58vh - 88px);
   }
 }

@@ -60,7 +60,7 @@ function _openEmailTagFilter(tag) {
   if (!normalized || normalized === 'calendar') return;
   try { openEmailLibrary(); } catch (_) {}
   setTimeout(() => {
-    document.dispatchEvent(new CustomEvent('odysseus:email-filter-tag', { detail: { tag: normalized } }));
+    document.dispatchEvent(new CustomEvent('aigenchain:email-filter-tag', { detail: { tag: normalized } }));
   }, 0);
 }
 
@@ -162,12 +162,12 @@ let _docModule = null;
 let _listSpinner = null;
 let _senderFilter = null;       // email address (lowercased) to filter by, or null
 let _senderFilterLabel = null;  // display label for the active filter chip
-let _showEmailTags = localStorage.getItem('odysseus.email.showTags') !== '0';
+let _showEmailTags = localStorage.getItem('aigenchain.email.showTags') !== '0';
 
 export function init(documentModule) {
   _docModule = documentModule;
   _bindEvents();
-  document.addEventListener('odysseus:email-tags-toggle', (e) => {
+  document.addEventListener('aigenchain:email-tags-toggle', (e) => {
     _showEmailTags = e.detail?.show !== false;
     _renderList();
   });
@@ -291,7 +291,7 @@ function _bindEvents() {
     });
   }
 
-  // Delay the lightweight unread badge check so opening Odysseus doesn't
+  // Delay the lightweight unread badge check so opening Aigenchain doesn't
   // compete with the initial chat/session paint. The full email list now loads
   // only when the inbox is actually opened.
   setTimeout(_refreshUnreadCount, 8000);
@@ -344,7 +344,7 @@ async function _refreshUnreadCount() {
     }
 
     // Compare highest unread UID to the last-seen threshold in localStorage
-    const lastSeen = parseInt(localStorage.getItem('odysseus-email-last-seen-uid') || '0', 10);
+    const lastSeen = parseInt(localStorage.getItem('aigenchain-email-last-seen-uid') || '0', 10);
     const maxUid = parseInt(data.max_uid || '0', 10) || 0;
 
     // Only show dot if there's a new email above the threshold
@@ -378,7 +378,7 @@ export function markInboxAsSeen() {
       .then(data => {
         const maxUid = parseInt(data.max_uid || '0', 10) || 0;
         if (maxUid > 0) {
-          localStorage.setItem('odysseus-email-last-seen-uid', String(maxUid));
+          localStorage.setItem('aigenchain-email-last-seen-uid', String(maxUid));
         }
         const dot = document.getElementById('email-unread-dot');
         if (dot) dot.style.display = 'none';

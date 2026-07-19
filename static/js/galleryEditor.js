@@ -3319,7 +3319,7 @@ function _openCookbookForDependency(pkgName) {
   tryHighlight();
 }
 
-// Async check whether `rembg` is installed on the Odysseus server.
+// Async check whether `rembg` is installed on the Aigenchain server.
 // Toggles the "install rembg" notice + the Bg Remove run button. The
 // `/api/cookbook/packages` endpoint is cheap (importlib calls only).
 async function _checkRembgInstalled() {
@@ -3412,7 +3412,7 @@ function _saveProject() {
   }
   const project = {
     v: 1,
-    type: 'odysseus-gallery-editor-project',
+    type: 'aigenchain-gallery-editor-project',
     imgWidth: state.imgWidth,
     imgHeight: state.imgHeight,
     activeLayerId: state.activeLayerId,
@@ -3451,7 +3451,7 @@ function _loadProjectPrompt() {
     try {
       const text = await file.text();
       const proj = JSON.parse(text);
-      if (proj.type !== 'odysseus-gallery-editor-project') {
+      if (proj.type !== 'aigenchain-gallery-editor-project') {
         if (uiModule) uiModule.showToast('Not a project file', 5000);
         return;
       }
