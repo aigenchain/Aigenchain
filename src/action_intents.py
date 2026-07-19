@@ -191,6 +191,10 @@ _ROUTING_PATTERNS: tuple[tuple[str, str, Pattern[str]], ...] = tuple(
         ("web", "current/latest lookup request", r"\b(?:current|latest|today'?s?|right\s+now|live|online)\b.{0,120}\b(?:rate|price|news|weather|forecast|score|exchange|market|status)\b"),
         ("web", "rate/price/news lookup request", r"\b(?:rate|rates|price|prices|news|weather|forecast|score|exchange|currency|market)\b.{0,120}\b(?:now|today|current|latest|online|live|search|look\s+up|find)\b"),
         ("web", "conversion-rate lookup request", r"\b(?:convert|conversion|exchange)\b.{0,120}\b(?:rate|rates|currency|currencies|price|prices)\b"),
+        # "who is the president of X right now" — a factual question pinned to the
+        # present moment. The trailing freshness marker distinguishes it from a
+        # stable-knowledge question ("who wrote Hamlet", "what is the capital ..").
+        ("web", "who/what is ... right now lookup", r"\b(?:who|what|where|how\s+much|how\s+many)\s+(?:is|are|was|were)\b.{0,100}\b(?:right\s+now|currently|today|these\s+days|at\s+the\s+moment|as\s+of\s+(?:today|now))\b"),
 
         # ---- Indonesian web-lookup phrasings ----
         # Freshness markers pair with news/finance/weather subjects so that
@@ -204,7 +208,7 @@ _ROUTING_PATTERNS: tuple[tuple[str, str, Pattern[str]], ...] = tuple(
         ("web", "kabar terbaru lookup (ID)", r"(?<!apa\s)\bkabar\b\s+(?:terbaru|terkini|terupdate)\b"),
         ("web", "harga/kurs terkini lookup (ID)", r"\b(?:harga|kurs|nilai\s+tukar|saham|kripto)\b.{0,60}\b(?:sekarang|saat\s+ini|hari\s+ini|terkini|terbaru|live|berapa)\b|\bberapa\b.{0,40}\b(?:harga|kurs)\b"),
         ("web", "cuaca lookup (ID)", r"\bcuaca\b.{0,60}\b(?:hari\s+ini|besok|sekarang|nanti\s+(?:sore|malam|pagi)|malam\s+ini|pagi\s+ini|sore\s+ini)\b|\b(?:ramalan|prakiraan)\s+cuaca\b"),
-        ("web", "skor/pertandingan lookup (ID)", r"\b(?:skor|hasil|pemenang|siapa\s+(?:yang\s+)?menang)\b.{0,60}\b(?:pertandingan|laga|bola|piala|liga|tadi(?:\s+malam)?|semalam|barusan|hari\s+ini)\b"),
+        ("web", "skor/pertandingan lookup (ID)", r"\b(?:skor|hasil|pemenang|jadwal|siapa\s+(?:yang\s+)?menang)\b.{0,60}\b(?:pertandingan|laga|bola|piala|liga|tadi(?:\s+malam)?|semalam|barusan|hari\s+ini|malam\s+ini|nanti)\b"),
         ("web", "trending/viral topic lookup (ID)", r"\b(?:trending|viral|lagi\s+ramai|lagi\s+heboh)\b.{0,60}\b(?:hari\s+ini|sekarang|saat\s+ini)\b|\b(?:apa\s+(?:yang\s+)?(?:lagi\s+)?|yang\s+lagi\s+)(?:trending|viral|ramai|heboh)\b"),
 
         ("research", "deep research imperative request", rf"{_PLEASE}(?:research|deep\s+dive|look\s+into|investigate)\s+.+"),

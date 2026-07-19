@@ -99,6 +99,31 @@ def test_indonesian_stable_knowledge_stays_plain_chat():
         assert intent.category != "web", f"unexpected web for: {text!r}"
 
 
+def test_english_present_moment_lookups_promote_to_web():
+    fresh = [
+        "who is the president of Argentina right now",
+        "who is the prime minister of the UK currently",
+        "what is the price of gold today",
+        "how much is one euro in dollars right now",
+    ]
+    for text in fresh:
+        intent = classify_tool_intent(text)
+        assert intent.category == "web", f"expected web for: {text!r} (got {intent.category})"
+
+
+def test_english_stable_who_what_stays_plain_chat():
+    stable = [
+        "who wrote Hamlet",
+        "what is the capital of Japan",
+        "who is Albert Einstein",
+        "what is the capital of France",
+        "who is the president of the United States",
+    ]
+    for text in stable:
+        intent = classify_tool_intent(text)
+        assert intent.category != "web", f"unexpected web for: {text!r}"
+
+
 def test_explanatory_calendar_questions_stay_plain_chat():
     assert not message_needs_tools("How do I add an entry to my calendar?")
     assert not message_needs_tools("What about the built-in Odysseus calendar, is that linked to email?")

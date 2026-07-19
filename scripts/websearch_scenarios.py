@@ -63,12 +63,33 @@ SCENARIOS = [
     {"group": "stable_knowledge", "prompt": "write a haiku about autumn", "should_search": False},
     {"group": "stable_knowledge", "prompt": "halo apa kabar", "should_search": False},
 
+    # ── Group 2b: English "who/what is X right now" → SHOULD search ────────
+    {"group": "en_fresh_who_is", "prompt": "who is the president of Argentina right now", "should_search": True},
+    {"group": "en_fresh_who_is", "prompt": "who is the prime minister of the UK currently", "should_search": True},
+    {"group": "en_fresh_who_is", "prompt": "what is the price of gold today", "should_search": True},
+    {"group": "en_fresh_who_is", "prompt": "how much is one euro in dollars right now", "should_search": True},
+    # Stable "who/what is" WITHOUT a freshness marker → should NOT search.
+    {"group": "en_stable_who_is", "prompt": "who wrote Hamlet", "should_search": False},
+    {"group": "en_stable_who_is", "prompt": "what is the capital of Japan", "should_search": False},
+    {"group": "en_stable_who_is", "prompt": "who is Albert Einstein", "should_search": False},
+
+    # ── Group 2c: more Indonesian fresh / stable coverage ─────────────────
+    {"group": "id_fresh_extra", "prompt": "jadwal pertandingan bola malam ini", "should_search": True},
+    {"group": "id_fresh_extra", "prompt": "berapa harga emas antam hari ini", "should_search": True},
+    {"group": "id_fresh_extra", "prompt": "cari di internet tentang lowongan kerja", "should_search": True},
+    {"group": "id_stable_extra", "prompt": "apa perbedaan RAM dan ROM", "should_search": False},
+    {"group": "id_stable_extra", "prompt": "jelaskan apa itu inflasi", "should_search": False},
+    {"group": "id_stable_extra", "prompt": "cara memasak rendang yang empuk", "should_search": False},
+
     # ── Group 3: contextual follow-up → second turn SHOULD search ─────────
+    # These require carrying prior-turn topic/source across turns (anaphora).
+    # Keyword-only detection cannot resolve them; they are measured SEPARATELY
+    # and are the target of the Fase C contextual-state work, not Fase B.
     {"group": "contextual_followup", "prompt": "berita terbaru soal harga emas", "should_search": True, "chain_start": True},
-    {"group": "contextual_followup", "prompt": "kalau yang di Amerika bagaimana?", "should_search": True, "followup": True},
+    {"group": "contextual_followup", "prompt": "kalau yang di Amerika bagaimana?", "should_search": True, "followup": True, "contextual": True},
 
     {"group": "contextual_followup_en", "prompt": "what is the latest news on AI regulation", "should_search": True, "chain_start": True},
-    {"group": "contextual_followup_en", "prompt": "and what about in Europe?", "should_search": True, "followup": True},
+    {"group": "contextual_followup_en", "prompt": "and what about in Europe?", "should_search": True, "followup": True, "contextual": True},
 
     # ── Group 4: ambiguous / boundary ─────────────────────────────────────
     {"group": "boundary", "prompt": "kabar terbaru tentang AI", "should_search": True},
@@ -182,6 +203,7 @@ def main():
             "prompt": sc["prompt"],
             "expected": exp,
             "got_search_enabled": got,
+            "contextual": bool(sc.get("contextual")),
             "search_trigger": dec.get("search_trigger"),
             "intent_category": dec.get("intent_category"),
             "effective_mode": dec.get("effective_mode"),
@@ -193,59 +215,88 @@ def main():
         print(f"{mark}[{group:22}] exp={int(exp)} got={int(got)} trig={dec.get('search_trigger')!s:18} :: {sc['prompt'][:55]}")
 
     # ── Metrics ───────────────────────────────────────────────────────────
-    tp = sum(1 for r in results if r["expected"] and r["got_search_enabled"])
-    fp = sum(1 for r in results if not r["expected"] and r["got_search_enabled"])
-    fn = sum(1 for r in results if r["expected"] and not r["got_search_enabled"])
-    tn = sum(1 for r in results if not r["expected"] and not r["got_search_enabled"])
-    total = len(results)
-    precision = tp / (tp + fp) if (tp + fp) else 0.0
-    recall = tp / (tp + fn) if (tp + fn) else 0.0
-    accuracy = (tp + tn) / total if total else 0.0
-    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+    # Decision thresholds for the manual-toggle call (agreed in planning).
+    THRESH_RECALL = 0.90
+    THRESH_PRECISION = 0.95
+
+    def _metrics(subset):
+        tp = sum(1 for r in subset if r["expected"] and r["got_search_enabled"])
+        fp = sum(1 for r in subset if not r["expected"] and r["got_search_enabled"])
+        fn = sum(1 for r in subset if r["expected"] and not r["got_search_enabled"])
+        tn = sum(1 for r in subset if not r["expected"] and not r["got_search_enabled"])
+        n = len(subset)
+        precision = tp / (tp + fp) if (tp + fp) else 1.0
+        recall = tp / (tp + fn) if (tp + fn) else 1.0
+        accuracy = (tp + tn) / n if n else 0.0
+        f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+        return {"tp": tp, "fp": fp, "fn": fn, "tn": tn, "total": n,
+                "precision": precision, "recall": recall,
+                "accuracy": accuracy, "f1": f1}
+
+    # Contextual follow-ups need cross-turn state (Fase C); they are NOT part
+    # of the keyword-targetable set the toggle decision is based on.
+    non_ctx = [r for r in results if not r.get("contextual")]
+    ctx = [r for r in results if r.get("contextual")]
+    overall = _metrics(results)
+    keyword = _metrics(non_ctx)
+    contextual = _metrics(ctx) if ctx else None
+
+    def _print_block(title, m):
+        print(f"\n{title}")
+        print(f"  Total    : {m['total']}")
+        print(f"  Confusion: TP={m['tp']} FP={m['fp']} FN={m['fn']} TN={m['tn']}")
+        print(f"  Precision: {m['precision']:.2f}")
+        print(f"  Recall   : {m['recall']:.2f}")
+        print(f"  Accuracy : {m['accuracy']:.2f}")
+        print(f"  F1       : {m['f1']:.2f}")
 
     print("\n" + "=" * 70)
     print("WEB-SEARCH AUTO-DETECTION REPORT (manual toggle OFF)")
     print("=" * 70)
-    print(f"Total scenarios : {total}")
-    print(f"Confusion       : TP={tp} FP={fp} FN={fn} TN={tn}")
-    print(f"Precision       : {precision:.2f}  (of auto-triggered, how many were right)")
-    print(f"Recall          : {recall:.2f}  (of should-search, how many auto-triggered)")
-    print(f"Accuracy        : {accuracy:.2f}")
-    print(f"F1              : {f1:.2f}")
+    _print_block("OVERALL (all scenarios)", overall)
+    _print_block("KEYWORD-TARGETABLE (excludes contextual follow-ups)", keyword)
+    if contextual:
+        _print_block("CONTEXTUAL FOLLOW-UPS (needs Fase C cross-turn state)", contextual)
 
     fns = [r for r in results if r["expected"] and not r["got_search_enabled"]]
     fps = [r for r in results if not r["expected"] and r["got_search_enabled"]]
     if fns:
         print(f"\nFALSE NEGATIVES ({len(fns)}) — should have searched but didn't:")
         for r in fns:
-            print(f"  - [{r['group']}] {r['prompt']}")
+            tag = " (contextual)" if r.get("contextual") else ""
+            print(f"  - [{r['group']}] {r['prompt']}{tag}")
     if fps:
         print(f"\nFALSE POSITIVES ({len(fps)}) — searched but shouldn't have:")
         for r in fps:
             print(f"  - [{r['group']}] {r['prompt']}")
 
-    # ── Recommendation ────────────────────────────────────────────────────
+    # ── Recommendation (threshold-based, on keyword-targetable subset) ─────
+    meets = (keyword["recall"] >= THRESH_RECALL
+             and keyword["precision"] >= THRESH_PRECISION)
     print("\n" + "-" * 70)
     print("RECOMMENDATION (manual web toggle):")
-    if recall >= 0.85 and precision >= 0.85:
-        print("  Auto-detect is reliable → the manual toggle can become an OPTIONAL")
-        print("  mode (default off). Most users won't need it.")
-    elif recall < 0.6:
-        print("  Auto-detect MISSES many web-worthy queries (low recall) → KEEP the")
-        print("  manual toggle; users still need it to force web search. Improving")
-        print("  intent patterns (esp. Indonesian) is the follow-up fix.")
+    print(f"  Thresholds: recall>={THRESH_RECALL:.2f} AND precision>={THRESH_PRECISION:.2f}")
+    print(f"  Keyword-targetable: recall={keyword['recall']:.2f} "
+          f"precision={keyword['precision']:.2f} → "
+          f"{'MEETS' if meets else 'BELOW'} thresholds")
+    if meets:
+        print("  → Auto-detect is reliable for explicit web-worthy phrasing.")
+        print("    Make the manual toggle an OPTIONAL power-user mode (default off);")
+        print("    keep it available to FORCE web on ambiguous/contextual turns")
+        print("    until Fase C closes the cross-turn follow-up gap.")
     else:
-        print("  Auto-detect is partial → KEEP the manual toggle for now; revisit")
-        print("  after improving intent detection. Consider surfacing it less")
-        print("  prominently once recall improves.")
+        print("  → KEEP the manual toggle prominent; auto-detect still misses too")
+        print("    much. Revisit after tightening intent patterns.")
     print("-" * 70)
 
     if args.json_out:
         with open(args.json_out, "w", encoding="utf-8") as f:
             json.dump({
-                "metrics": {"tp": tp, "fp": fp, "fn": fn, "tn": tn,
-                            "precision": precision, "recall": recall,
-                            "accuracy": accuracy, "f1": f1, "total": total},
+                "thresholds": {"recall": THRESH_RECALL, "precision": THRESH_PRECISION},
+                "meets_thresholds": meets,
+                "metrics_overall": overall,
+                "metrics_keyword_targetable": keyword,
+                "metrics_contextual": contextual,
                 "results": results,
             }, f, indent=2, ensure_ascii=False)
         print(f"\nRaw results written to {args.json_out}")
