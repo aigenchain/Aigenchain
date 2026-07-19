@@ -11,6 +11,11 @@ pypdf
 beautifulsoup4
 charset-normalizer
 numpy
+# Offline, CPU-only TTS (Bahasa Indonesia via id_ID-news_tts-medium, plus other
+# Piper voices). piper-tts vendors its phonemizer (espeakbridge) and espeak-ng
+# data, so no system espeak is needed. It reuses the onnxruntime wheel already
+# pulled by fastembed below. Works on the python:3.14-slim base (abi3 wheel).
+piper-tts
 # Vector store + local embeddings for RAG, semantic memory, and tool
 # selection. Used on core agent paths, so installed by default — the app
 # still degrades to keyword fallback if they're ever missing.

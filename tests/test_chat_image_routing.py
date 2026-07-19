@@ -4,7 +4,6 @@ for mod_name in ["src.endpoint_resolver", "src.database", "core.database"]:
     if _mod is not None and not getattr(_mod, "__file__", None):
         sys.modules.pop(mod_name, None)
 
-import json
 from types import SimpleNamespace
 
 from tests.helpers.import_state import clear_fake_endpoint_resolver_modules
@@ -12,77 +11,47 @@ from tests.helpers.import_state import clear_fake_endpoint_resolver_modules
 clear_fake_endpoint_resolver_modules("routes.chat_routes")
 
 from routes import chat_routes
-
-
-class _FakeQuery:
-    def __init__(self, rows):
-        self.rows = rows
-
-    def filter(self, *conditions):
-        return self
-
-    def all(self):
-        return list(self.rows)
-
-
-class _FakeDb:
-    def __init__(self, rows):
-        self.rows = rows
-        self.closed = False
-
-    def query(self, model):
-        return _FakeQuery(self.rows)
-
-    def close(self):
-        self.closed = True
+from src.action_intents import classify_tool_intent
 
 
 def _session(model="qwen3.5:latest", endpoint_url="http://localhost:11434/v1/chat/completions"):
-    return SimpleNamespace(model=model, endpoint_url=endpoint_url)
+    return SimpleNamespace(model=model, endpoint_url=endpoint_url, is_image=True)
 
 
-def _endpoint(base_url, model_type="image", models=None):
-    cached_models = None if models is None else json.dumps(models)
-    return SimpleNamespace(
-        base_url=base_url,
-        model_type=model_type,
-        is_enabled=True,
-        cached_models=cached_models,
-    )
-
-
-def test_image_model_prefix_routes_to_image_generation_without_endpoint_lookup(monkeypatch):
+def test_image_generation_is_never_a_sticky_session_mode(monkeypatch):
+    # Images are produced only when the LLM calls the generate_image tool. The
+    # legacy per-session routing (image model prefixes, endpoint matching, the
+    # sticky is_image flag) must no longer force a session into image mode.
     def fail_if_called():
-        raise AssertionError("prefixed image models should not need a DB lookup")
+        raise AssertionError("image routing must not touch the DB anymore")
 
     monkeypatch.setattr(chat_routes, "SessionLocal", fail_if_called)
 
-    assert chat_routes._is_image_generation_session(_session(model="dall-e-3"))
-
-
-def test_image_endpoint_does_not_catch_text_model_on_different_path(monkeypatch):
-    db = _FakeDb([
-        _endpoint("http://localhost:11434/v1/images", models=["sdxl-local"]),
-    ])
-    monkeypatch.setattr(chat_routes, "SessionLocal", lambda: db)
-
+    assert not chat_routes._is_image_generation_session(_session(model="dall-e-3"))
+    assert not chat_routes._is_image_generation_session(_session(model="sdxl-local"))
     assert not chat_routes._is_image_generation_session(_session())
-    assert db.closed
 
 
-def test_image_endpoint_cache_must_contain_selected_model(monkeypatch):
-    db = _FakeDb([
-        _endpoint("http://localhost:11434/v1", models=["sdxl-local"]),
-    ])
-    monkeypatch.setattr(chat_routes, "SessionLocal", lambda: db)
+def test_explicit_image_requests_are_detected_as_image_intent():
+    for text in (
+        "tolong buatkan gambar kucing astronot",
+        "gambarkan proses fotosintesis",
+        "generate an image of a sunset",
+        "draw me a robot",
+        "bikin ilustrasi naga",
+        "create a poster for my event",
+    ):
+        intent = classify_tool_intent(text)
+        assert intent.needs_tools and intent.category == "image", text
 
-    assert not chat_routes._is_image_generation_session(_session(model="qwen3.5:latest"))
 
-
-def test_matching_image_endpoint_routes_selected_image_model(monkeypatch):
-    db = _FakeDb([
-        _endpoint("http://localhost:11434/v1", models=["sdxl-local"]),
-    ])
-    monkeypatch.setattr(chat_routes, "SessionLocal", lambda: db)
-
-    assert chat_routes._is_image_generation_session(_session(model="sdxl-local"))
+def test_plain_chat_and_questions_do_not_trigger_image_intent():
+    for text in (
+        "apa itu fotosintesis?",
+        "apa itu image generation?",
+        "how does image generation work?",
+        "jelaskan cara membuat gambar dengan AI",
+        "halo apa kabar",
+    ):
+        intent = classify_tool_intent(text)
+        assert not (intent.needs_tools and intent.category == "image"), text

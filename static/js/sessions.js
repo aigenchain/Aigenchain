@@ -268,7 +268,7 @@ function _deselectCurrentSession(sid) {
   if (currentSessionId !== sid) return;
   currentSessionId = null;
   uiModule.el('chat-history').innerHTML = '';
-  uiModule.el('current-meta').textContent = 'Odysseus Chat';
+  uiModule.el('current-meta').textContent = 'Aigenchain Chat';
   Storage.remove('lastSessionId');
   history.replaceState(null, '', window.location.pathname);
   if (window.chatModule && window.chatModule.showWelcomeScreen) {
@@ -1853,10 +1853,9 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
     const activeEl = document.querySelector(`.list-item[data-session-id="${id}"]`);
     if (activeEl) activeEl.classList.add('active-session');
 
-    const currentMetaEl = uiModule.el('current-meta');
-    if (currentMetaEl) {
-      currentMetaEl.textContent = meta ? meta.name : 'Odysseus Chat';
-    }
+    // Header shows `Name · model` for the active session (single source of
+    // truth so a later model switch stays in sync).
+    refreshSessionHeader();
     // Update model picker visibility
     updateModelPicker();
 
@@ -2087,7 +2086,7 @@ export async function selectSession(id, { keepSidebar = false, showLoading = tru
 // Pending session — stored locally until the first message is sent
 let _pendingChat = null; // { url, modelId, endpointId }
 
-export function createDirectChat(url, modelId, endpointId) {
+export function createDirectChat(url, modelId, endpointId, source) {
   _sessionNavToken++;
   // Detach any active stream so it doesn't interfere with the new chat
   if (window.chatModule && window.chatModule.detachCurrentStream) {
@@ -2100,8 +2099,12 @@ export function createDirectChat(url, modelId, endpointId) {
     if (window._syncGroupIndicator) window._syncGroupIndicator(false);
   }
 
-  // Don't hit the API — just store the model info and prepare the UI
-  _pendingChat = { url, modelId, endpointId };
+  // Don't hit the API — just store the model info and prepare the UI.
+  // Preserve the pick's provenance: a 'manual' source protects it from being
+  // overwritten by _ensureDefaultPendingChat() (which otherwise resets an
+  // explicit user pick back to the server default model). Callers that create
+  // an implicit/default chat pass no source (or 'default'/'fallback').
+  _pendingChat = { url, modelId, endpointId, source: source || undefined };
   _skipAutoSelect = true;
   _suppressNextSessionLoading = true;
   currentSessionId = null;
@@ -2223,6 +2226,38 @@ export function getCurrentModel() {
   // Pending session not yet materialized — read from model picker label
   const label = document.getElementById('model-picker-label');
   return label ? label.textContent.trim() : null;
+}
+
+/**
+ * Single source of truth for the conversation header (`#current-meta`).
+ * Always renders `Name · model` for the active (or pending) session so the
+ * active model is visible and stays in sync after a mid-session model switch.
+ * Previously the header was written from several places with inconsistent
+ * formats, so switching the model left the old model showing.
+ */
+export function refreshSessionHeader() {
+  const metaEl = document.getElementById('current-meta');
+  if (!metaEl) return;
+  const sess = sessions.find(x => x.id === currentSessionId);
+  let name = '';
+  let model = '';
+  let archived = false;
+  if (sess) {
+    name = sess.name || 'Untitled';
+    model = sess.model || '';
+    archived = !!sess.archived;
+  } else if (_pendingChat && _pendingChat.modelId) {
+    name = 'New Chat';
+    model = _pendingChat.modelId || '';
+  } else {
+    metaEl.textContent = 'Aigenchain Chat';
+    return;
+  }
+  const modelShort = model ? model.split('/').pop() : '';
+  let text = name;
+  if (modelShort) text += ' \u00b7 ' + modelShort;
+  if (archived) text += ' (archived)';
+  metaEl.textContent = text;
 }
 
 /** Endpoint URL serving the current (or pending) session's model. Used to
@@ -2593,6 +2628,7 @@ function _initAllDropdowns() {
     getPendingChat: () => _pendingChat,
     setPendingChat: (v) => { _pendingChat = v; },
     createDirectChat,
+    refreshSessionHeader,
   });
   _initDropdownDismiss();
   _initBulkSelect();

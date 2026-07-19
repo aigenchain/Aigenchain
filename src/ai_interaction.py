@@ -17,6 +17,7 @@ through the standard agent_tools.py pipeline.
 import asyncio
 import json
 import logging
+import re
 import uuid
 import time
 from typing import Dict, Optional, Tuple
@@ -884,6 +885,45 @@ async def do_ui_control(content: str, session_id: Optional[str] = None, owner: O
 # Image generation
 # ---------------------------------------------------------------------------
 
+_IMG_CMD_PREFIX_RE = re.compile(
+    r"^\s*(?:please|pls|kindly|por favor|s'?il vous pla[iî]t|bitte|por gentileza|"
+    r"tolong|mohon|coba|please\s+)?[,\s]*"
+    r"(?:"
+    # EN command verbs + optional "me/a/an/some image of"
+    r"generate|create|make|draw|render|paint|design|sketch|produce|show(?:\s+me)?|give(?:\s+me)?|"
+    # ID/MS
+    r"buatkan|buatin|buat|bikinkan|bikinin|bikin|gambarkan|gambarin|gambar|tampilkan|"
+    # ES/PT/FR/DE/IT
+    r"genera|crea|dibuja|dib[uú]jame|pinta|desenha|desenhe|dessine(?:-moi)?|"
+    r"zeichne(?:\s+mir)?|male(?:\s+mir)?|disegna|disegnami|dipingi|"
+    # RU/TR/VI
+    r"нарисуй|создай|сгенерируй|çiz|oluştur|v[eẽ]"
+    r")\b"
+    # optional connective words: "me a picture of", "sebuah gambar", "an image of"
+    r"(?:\s+(?:me|us)\b)?"
+    r"(?:\s+(?:a|an|the|some|one|un|una|uno|ein|eine|sebuah|satu)\b)?"
+    r"(?:\s+(?:image|picture|photo|photograph|drawing|illustration|art|artwork|"
+    r"gambar|foto|ilustrasi|lukisan|sketsa|imagen|imagem|dessin|bild|immagine)\b)?"
+    r"(?:\s+(?:of|showing|de|del|di|von|van|tentang|dari)\b)?"
+    r"[:\s,]*",
+    re.IGNORECASE,
+)
+
+
+def _clean_image_prompt(prompt: str) -> str:
+    """Strip the command-verb prefix ("buat gambar", "draw me a picture of",
+    …) so the diffusion model receives the *subject* only. Short raw commands
+    like "buat gambar pantai" otherwise ship the verb to flux and are also more
+    likely to trip Cloudflare's NSFW false-positive filter. If stripping would
+    empty the prompt, keep the original."""
+    if not prompt:
+        return prompt
+    cleaned = _IMG_CMD_PREFIX_RE.sub("", prompt, count=1).strip()
+    if not cleaned:
+        return prompt.strip()
+    return cleaned
+
+
 async def do_generate_image(content: str, session_id: Optional[str] = None, owner: Optional[str] = None) -> Dict:
     """Generate an image using an image-capable model (e.g. gpt-image-1).
 
@@ -908,6 +948,8 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
     if not prompt:
         return {"error": "Image prompt is required (line 1)"}
 
+    prompt = _clean_image_prompt(prompt)
+
     # Load admin settings for defaults
     try:
         from src.settings import load_settings
@@ -920,6 +962,109 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
         model_spec = _settings.get("image_model", "")
     if quality == "medium" and _settings.get("image_quality"):
         quality = _settings["image_quality"]
+
+    # ── Image API Providers layer ──
+    # If an admin configured an active image provider (e.g. Cloudflare Workers
+    # AI, OpenAI-compatible) in Settings → Image API Providers, use it directly
+    # instead of the OpenAI/ModelEndpoint path below. This keeps the existing
+    # pipeline working as a fallback when no provider is configured.
+    try:
+        from src import image_providers as _ip
+        _active_provider = _ip.get_active_provider()
+        if _active_provider:
+            try:
+                import base64 as _b64
+                from pathlib import Path as _Path
+                try:
+                    _b64_img = _ip.generate_via_provider(
+                        _active_provider, prompt, size=size, quality=quality, timeout=300.0
+                    )
+                except Exception as _gen_exc:
+                    # Cloudflare (and some providers) run an aggressive NSFW
+                    # classifier that false-positives on innocuous short prompts
+                    # (e.g. "pantai"/"beach"). Retry once with a neutral,
+                    # safe-for-work framing before giving up.
+                    if "nsfw" in str(_gen_exc).lower():
+                        _safe_prompt = (
+                            f"A tasteful, family-friendly, safe-for-work photograph of {prompt}, "
+                            f"scenic, high quality, natural lighting"
+                        )
+                        _b64_img = _ip.generate_via_provider(
+                            _active_provider, _safe_prompt, size=size, quality=quality, timeout=300.0
+                        )
+                        prompt = _safe_prompt
+                    else:
+                        raise
+                _img_dir = _Path(GENERATED_IMAGES_DIR)
+                _img_dir.mkdir(parents=True, exist_ok=True)
+                # Provider returns base64-encoded image data (string). Decode
+                # it to raw bytes before writing — writing the base64 text
+                # directly (the old `.encode("ascii")`) produced a corrupt
+                # .png the browser could not render.
+                _b64_raw = _b64_img.strip() if isinstance(_b64_img, str) else _b64_img
+                if isinstance(_b64_raw, str):
+                    if _b64_raw.startswith("data:"):
+                        _b64_raw = _b64_raw.split(",", 1)[1]
+                    _img_bytes = _b64.b64decode(_b64_raw)
+                else:
+                    _img_bytes = _b64_raw
+                # Pick the extension from the actual bytes so the served mime
+                # matches the container (flux may emit jpeg/webp, not just png).
+                if _img_bytes[:3] == b"GIF":
+                    _ext = "gif"
+                elif _img_bytes[:2] == b"\xff\xd8":
+                    _ext = "jpg"
+                elif _img_bytes[:4] == b"RIFF" and _img_bytes[8:12] == b"WEBP":
+                    _ext = "webp"
+                else:
+                    _ext = "png"
+                _filename = f"{uuid.uuid4().hex[:12]}.{_ext}"
+                (_img_dir / _filename).write_bytes(_img_bytes)
+                _image_url = f"/api/generated-image/{_filename}"
+
+                def _save_provider_image(filename: str) -> str:
+                    try:
+                        from src.database import SessionLocal as _GSL, GalleryImage as _GI
+                        _nid = str(uuid.uuid4())
+                        _gdb = _GSL()
+                        try:
+                            _gdb.add(_GI(
+                                id=_nid,
+                                filename=filename,
+                                prompt=prompt,
+                                model=_active_provider.get("config", {}).get("model", _active_provider.get("provider", "")),
+                                size=size,
+                                quality=quality,
+                                session_id=session_id,
+                                owner=owner,
+                            ))
+                            _gdb.commit()
+                            _gdb.close()
+                            return _nid
+                        except Exception:
+                            _gdb.close()
+                            return ""
+                    except Exception:
+                        return ""
+
+                _image_id = _save_provider_image(_filename)
+                return {
+                    "results": "",
+                    "image_url": _image_url,
+                    "image_id": _image_id,
+                    "image_prompt": prompt,
+                    "image_model": _active_provider.get("config", {}).get("model", _active_provider.get("provider", "")),
+                    "image_size": size,
+                    "image_quality": quality,
+                }
+            except ValueError as _pe:
+                return {"error": f"Image provider error: {str(_pe)}"}
+            except Exception as _pe:
+                return {"error": f"Image provider error: {str(_pe)}"}
+    except Exception as _ipe:
+        # If the providers layer fails to import/load, fall through to the
+        # default OpenAI/ModelEndpoint path rather than breaking image gen.
+        logger.warning(f"Image provider layer skipped: {_ipe}")
 
     # Auto-detect best available image model if still not set
     if not model_spec:
@@ -965,7 +1110,7 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
             except Exception:
                 pass
         if not model_spec:
-            return {"error": "No image model found. Configure one in Admin → Image Generation."}
+            return {"error": "No image provider configured. Add one in Settings → Image API Providers (admin)."}
 
     # Resolve the model to find the right endpoint
     try:
@@ -1091,7 +1236,7 @@ async def do_generate_image(content: str, session_id: Optional[str] = None, owne
                 return {"error": "Image API returned unexpected format (no b64_json or url)"}
 
             return {
-                "results": f"Generated image for: {prompt[:100]}",
+                "results": "",
                 "image_url": image_url,
                 "image_id": image_id,
                 "image_prompt": prompt,

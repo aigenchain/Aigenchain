@@ -661,6 +661,10 @@ app.include_router(setup_session_routes(session_manager, session_config, webhook
 from routes.admin_wipe_routes import setup_admin_wipe_routes
 app.include_router(setup_admin_wipe_routes(session_manager))
 
+# Router-decision observability (Tahap 2)
+from routes.router_decision_routes import setup_router_decision_routes
+app.include_router(setup_router_decision_routes())
+
 # Memory
 from routes.memory.memory_routes import setup_memory_routes
 memory_router = setup_memory_routes(memory_manager, session_manager, memory_vector=memory_vector)

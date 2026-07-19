@@ -155,6 +155,30 @@ def _reject_raw_endpoint_url_for_non_admin(
         raise HTTPException(403, "Choose a registered model endpoint")
 
 
+def _is_image_provider_request(model: str, endpoint_id: str) -> bool:
+    """True when `model`/`endpoint_id` belong to the active Image API Provider
+    (e.g. Cloudflare Workers AI @cf/…/flux models). Such models are NOT served
+    by an OpenAI-compatible ModelEndpoint, so session create/update must skip
+    the endpoint lookup, the endpoint_url requirement, and /v1/models probing,
+    and instead let the chat layer route the request through the image_providers
+    layer (see chat_routes._is_image_generation_session).
+
+    The model picker injects these models with endpoint_id="image-provider:<id>";
+    we also accept a @cf/… or flux model name when an active provider exists, so
+    a session created with just the model id still routes correctly.
+    """
+    if endpoint_id and str(endpoint_id).strip().startswith("image-provider:"):
+        return True
+    m = (model or "").strip().lower()
+    if m.startswith("@cf") or "flux" in m:
+        try:
+            from src import image_providers as _ip
+            return _ip.get_active_provider() is not None
+        except Exception:
+            return False
+    return False
+
+
 def _persist_session_headers(session_id: str, headers: dict | None) -> None:
     """Persist endpoint auth headers for DB-backed session metadata."""
     db = SessionLocal()
@@ -333,6 +357,29 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
         endpoint_api_key = ""
         endpoint_base_url = ""
         _reject_raw_endpoint_url_for_non_admin(request, user, endpoint_id, endpoint_url)
+
+        # Image API Provider models (Cloudflare @cf/…/flux, …) are not backed by
+        # a ModelEndpoint. Create the session directly so the chat routes it
+        # through the image_providers layer — skip the endpoint lookup, the
+        # endpoint_url requirement, and /v1/models validation.
+        if _is_image_provider_request(model, endpoint_id):
+            sid = str(uuid.uuid4())
+            session = session_manager.create_session(
+                session_id=sid,
+                name=name or "",
+                endpoint_url="",
+                model=model,
+                rag=str(rag).lower() == "true" if rag else False,
+                owner=user,
+            )
+            return SessionResponse(
+                id=sid,
+                name=session.name,
+                model=model,
+                rag=str(rag).lower() == "true" if rag else False,
+                archived=False,
+            )
+
         if endpoint_id and endpoint_id.strip():
             from core.database import ModelEndpoint
             from src.auth_helpers import owner_filter
@@ -477,8 +524,29 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
             finally:
                 db.close()
         # Switch model/endpoint mid-session
-        if model is not None and endpoint_url is not None:
+        if model is not None and (endpoint_url is not None or _is_image_provider_request(model, endpoint_id)):
             user = effective_user(request)
+            # Image API Provider model: no real ModelEndpoint backs it, so skip
+            # the endpoint lookup and just record the model (empty endpoint_url
+            # tells the chat layer to route via the image_providers layer).
+            if _is_image_provider_request(model, endpoint_id):
+                session.model = model
+                session.endpoint_url = ""
+                session.headers = {}
+                db = SessionLocal()
+                try:
+                    db_session = db.query(DbSession).filter(DbSession.id == sid).first()
+                    if db_session:
+                        db_session.model = model
+                        db_session.endpoint_url = ""
+                        db_session.headers = {}
+                        db_session.updated_at = utcnow_naive()
+                        db.commit()
+                finally:
+                    db.close()
+                result["model"] = model
+                result["endpoint_url"] = ""
+                return result
             _reject_raw_endpoint_url_for_non_admin(request, user, endpoint_id, endpoint_url)
             endpoint_api_key = ""
             endpoint_base_url = ""

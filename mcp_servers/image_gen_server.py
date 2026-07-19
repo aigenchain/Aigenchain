@@ -62,6 +62,32 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         if not get_setting("image_gen_enabled", True):
             return [TextContent(type="text", text="Error: Image generation is disabled by the administrator.")]
 
+        # ── Prefer the admin-configured active Image API Provider (e.g.
+        # Cloudflare Workers AI / flux) via do_generate_image. Without this the
+        # agent-loop path fell through to the OpenAI /images route below and
+        # failed with "No image model found" whenever the only configured
+        # provider was Cloudflare — so images silently never rendered.
+        try:
+            from src import image_providers as _ip
+            if _ip.get_active_provider():
+                from src.ai_interaction import do_generate_image as _dgi
+                _res = await _dgi(prompt)
+                if isinstance(_res, dict) and _res.get("image_url"):
+                    _iu = _res["image_url"]
+                    _pub = (get_setting("app_public_url", "") or "").rstrip("/")
+                    if _pub and _iu.startswith("/"):
+                        _iu = _pub + _iu
+                    _text = (
+                        f"Generated image for: {prompt[:100]}\n"
+                        f"Direct link: {_iu}\n"
+                        f"model: {_res.get('image_model', '')}\nsize: {_res.get('image_size', size)}"
+                    )
+                    return [TextContent(type="text", text=_text)]
+                if isinstance(_res, dict) and _res.get("error"):
+                    return [TextContent(type="text", text=f"Error: {_res['error']}")]
+        except Exception as _ipe:
+            print(f"image_gen: active-provider path failed, falling back: {_ipe}", file=sys.stderr)
+
         _settings = load_settings()
 
         if not model_spec:

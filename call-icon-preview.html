@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Call icon reference — Sound wave bars</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; padding: 40px;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    background: #0f1115; color: #e6e6e6;
+  }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  p.sub { color: #9aa0a6; margin: 0 0 32px; font-size: 13px; }
+  .row {
+    display: flex; gap: 40px; flex-wrap: wrap;
+    align-items: flex-end; margin-bottom: 36px;
+    padding-bottom: 28px; border-bottom: 1px solid #222;
+  }
+  .cell { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .label { font-size: 12px; color: #9aa0a6; letter-spacing: .02em; }
+  .chip {
+    display: flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; border-radius: 12px;
+    background: #1a1d23; border: 1px solid #2a2e36; color: #e6e6e6;
+  }
+  .chip.brand { color: #4f9cff; border-color: #2f5b8f; }
+  .chip.warn  { color: #ff5f56; border-color: #7a2f2c; background: #251615; }
+  .chip svg { width: 22px; height: 22px; }
+  .code {
+    background: #16191f; border: 1px solid #222; border-radius: 10px;
+    padding: 14px 16px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; color: #c8d0da; white-space: pre; overflow-x: auto; line-height: 1.5;
+  }
+  .active-bars line { transform-box: fill-box; transform-origin: center; animation: pulse 1s ease-in-out infinite; }
+  .active-bars line:nth-child(1) { animation-delay: 0s; }
+  .active-bars line:nth-child(2) { animation-delay: .15s; }
+  .active-bars line:nth-child(3) { animation-delay: .3s; }
+  .active-bars line:nth-child(4) { animation-delay: .15s; }
+  .active-bars line:nth-child(5) { animation-delay: 0s; }
+  @keyframes pulse { 0%,100% { transform: scaleY(.5); } 50% { transform: scaleY(1); } }
+  .scale { display: flex; align-items: center; gap: 18px; }
+</style>
+</head>
+<body>
+  <h1>Call icon — “Sound wave bars” (reference)</h1>
+  <p class="sub">Matches the existing mic icon style: 24×24 viewBox, fill none, stroke=currentColor, stroke-width 2, round linecaps.
+     Open this file in your browser to compare against the mic icon you already have.</p>
+
+  <div class="row">
+    <div class="cell">
+      <div class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></div>
+      <div class="label">Existing mic icon (reference)</div>
+    </div>
+    <div class="cell">
+      <div class="chip brand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="10" x2="4" y2="14"/><line x1="8" y1="6" x2="8" y2="18"/><line x1="12" y1="3" x2="12" y2="21"/><line x1="16" y1="6" x2="16" y2="18"/><line x1="20" y1="10" x2="20" y2="14"/></svg></div>
+      <div class="label">Call — idle (sound wave bars)</div>
+    </div>
+    <div class="cell">
+      <div class="chip warn"><svg class="active-bars" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="10" x2="4" y2="14"/><line x1="8" y1="6" x2="8" y2="18"/><line x1="12" y1="3" x2="12" y2="21"/><line x1="16" y1="6" x2="16" y2="18"/><line x1="20" y1="10" x2="20" y2="14"/></svg></div>
+      <div class="label">Call — active (bars animate while live)</div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="label" style="margin-bottom:0">Composer placement (how it will sit next to mic):</div>
+    <div class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></div>
+    <div class="chip brand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="10" x2="4" y2="14"/><line x1="8" y1="6" x2="8" y2="18"/><line x1="12" y1="3" x2="12" y2="21"/><line x1="16" y1="6" x2="16" y2="18"/><line x1="20" y1="10" x2="20" y2="14"/></svg></div>
+  </div>
+
+  <h1 style="font-size:14px;margin-top:8px">SVG markup (idle)</h1>
+  <div class="code">&lt;svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"&gt;
+  &lt;line x1="4"  y1="10" x2="4"  y2="14"/&gt;
+  &lt;line x1="8"  y1="6"  x2="8"  y2="18"/&gt;
+  &lt;line x1="12" y1="3"  x2="12" y2="21"/&gt;
+  &lt;line x1="16" y1="6"  x2="16" y2="18"/&gt;
+  &lt;line x1="20" y1="10" x2="20" y2="14"/&gt;
+&lt;/svg&gt;</div>
+
+  <p class="sub" style="margin-top:24px">Notes: the “active” state reuses the same bars with a CSS scaleY pulse so it reads as a live
+     equalizer. Optional: while a call is live the icon button could also tint to the brand/accent color. End Call uses a separate
+     red button inside the call overlay (per the agreed design).</p>
+</body>
+</html>

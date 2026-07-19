@@ -1210,11 +1210,11 @@ async function _exportComparison(btn) {
 
 /**
  * Build the eval-prompts picker — shown only during compare. Mirrors the
- * absolute-positioned model-picker location (top-right of .chat-input-top)
+ * absolute-positioned model-picker location (far-left of .chat-input-bar)
  * and is auto-cleaned up by the standard _compareElements teardown.
  */
 function _setupEvalPicker() {
-  const inputTop = document.querySelector('.chat-input-top');
+  const inputTop = document.querySelector('.chat-input-bar');
   if (!inputTop) return;
 
   const escapeHtml = uiModule.esc;

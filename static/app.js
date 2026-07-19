@@ -20,6 +20,7 @@ import chatRenderer from './js/chatRenderer.js';
 import sessionModule from './js/sessions.js';
 import memoryModule from './js/memory.js';
 import voiceRecorderModule from './js/voiceRecorder.js';
+window.voiceRecorderModule = voiceRecorderModule;
 import censorModule from './js/censor.js';
 import galleryModule from './js/gallery.js';
 import tasksModule from './js/tasks.js?v=20260630tasksactivity';
@@ -529,7 +530,7 @@ function initializeEventListeners() {
       e.stopPropagation();
       exportMenu.classList.remove('open');
       const meta = sessionModule.getSessions().find(s => s.id === sessionModule.getCurrentSessionId());
-      const sessionName = meta ? meta.name : 'Odysseus Chat';
+      const sessionName = meta ? meta.name : 'Aigenchain';
       const originalTitle = document.title;
       document.title = sessionName;
       const chatHistory = document.getElementById('chat-history');
@@ -927,11 +928,10 @@ function initializeEventListeners() {
     const welcomeName = document.querySelector('.welcome-name');
     const welcomeSub = el('welcome-sub');
     const tipEl = el('welcome-tip');
-    const _resIco = '<svg class="welcome-boat" style="position:relative;top:0.5px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>';
     if (active) {
       if (welcomeName) {
         if (!welcomeName.dataset.researchOrigHtml) welcomeName.dataset.researchOrigHtml = welcomeName.innerHTML;
-        welcomeName.innerHTML = _resIco + 'Deep Research';
+        welcomeName.innerHTML = 'Deep Research';
       }
       if (welcomeSub) {
         if (!welcomeSub.dataset.researchOrigText) welcomeSub.dataset.researchOrigText = welcomeSub.textContent;
@@ -1651,8 +1651,8 @@ function initializeEventListeners() {
           const meta = sessionModule.getSessions().find(s => s.id === sessionModule.getCurrentSessionId());
           if (meta) {
             meta.name = newName;
-            const ver = window._appVersion ? ` v${window._appVersion}` : '';
-            el('current-meta').textContent = `Session: ${meta.name}${meta.model ? ' ' + meta.model.split('/').pop() : ''}${meta.rag ? ' [RAG]' : ''}${ver}`;
+            // Single source of truth for the header (Name · model).
+            sessionModule.refreshSessionHeader();
           }
           // Refresh the sessions list
         await sessionModule.loadSessions();
@@ -1716,8 +1716,8 @@ function initializeEventListeners() {
   // Mode-affected tools: default ON in Agent mode, default OFF in Chat mode,
   // but the user's explicit per-mode override is persisted and honored.
   const MODE_TOOLS = [
-    { btnId: 'web-toggle-btn',  checkboxId: 'web-toggle',  stateKey: 'web' },
-    { btnId: 'bash-toggle-btn', checkboxId: 'bash-toggle', stateKey: 'bash' },
+    { btnIds: ['web-toggle-btn', 'overflow-web-btn'],  checkboxId: 'web-toggle',  stateKey: 'web' },
+    { btnIds: ['bash-toggle-btn', 'overflow-shell-btn'], checkboxId: 'bash-toggle', stateKey: 'bash' },
   ];
 
   function _modeKey(stateKey, mode) { return `${stateKey}_${mode}`; }
@@ -1747,20 +1747,22 @@ function initializeEventListeners() {
   }
 
   function applyModeToToggles(mode) {
-    MODE_TOOLS.forEach(({ btnId, checkboxId, stateKey }) => {
-      const btn = el(btnId);
-      if (!btn) return;
-      // Hide bash button in chat mode
-      if (mode === 'chat' && stateKey === 'bash') {
-        btn.style.display = 'none';
-        return;
-      }
-      // Show buttons in agent mode (or for web toggle in any mode)
-      btn.style.display = '';
-      if (btn.style.display === 'none') return;
-      const on = loadToolPref(stateKey, mode);
-      btn.classList.toggle('active', on);
-      if (checkboxId) { const chk = el(checkboxId); if (chk) chk.checked = on; }
+    MODE_TOOLS.forEach(({ btnIds, checkboxId, stateKey }) => {
+      (Array.isArray(btnIds) ? btnIds : [btnIds]).forEach((btnId) => {
+        const btn = el(btnId);
+        if (!btn) return;
+        // Hide bash button in chat mode
+        if (mode === 'chat' && stateKey === 'bash') {
+          btn.style.display = 'none';
+          return;
+        }
+        // Show buttons in agent mode (or for web toggle in any mode)
+        btn.style.display = '';
+        if (btn.style.display === 'none') return;
+        const on = loadToolPref(stateKey, mode);
+        btn.classList.toggle('active', on);
+        if (checkboxId) { const chk = el(checkboxId); if (chk) chk.checked = on; }
+      });
     });
   }
 
@@ -1769,6 +1771,11 @@ function initializeEventListeners() {
     const agentBtn = el('mode-agent-btn');
     const chatBtn = el('mode-chat-btn');
     if (!agentBtn || !chatBtn) return;
+    // Overflow-menu (mobile-only) mirrors of the mode toggle — keep them in
+    // sync so the active mode is reflected whether switched from the bar or
+    // the + menu.
+    const overflowAgent = el('overflow-agent-btn');
+    const overflowChat = el('overflow-chat-btn');
     const state = loadToggleState();
     let currentMode = state.mode || 'chat';
 
@@ -1787,6 +1794,14 @@ function initializeEventListeners() {
       chatBtn.classList.toggle('active', mode === 'chat');
       agentBtn.setAttribute('aria-pressed', String(mode === 'agent'));
       chatBtn.setAttribute('aria-pressed', String(mode === 'chat'));
+      if (overflowAgent) {
+        overflowAgent.classList.toggle('active', mode === 'agent');
+        overflowAgent.setAttribute('aria-pressed', String(mode === 'agent'));
+      }
+      if (overflowChat) {
+        overflowChat.classList.toggle('active', mode === 'chat');
+        overflowChat.setAttribute('aria-pressed', String(mode === 'chat'));
+      }
       // Slide the pill to the active button
       const toggle = agentBtn.closest('.mode-toggle');
       if (toggle) toggle.classList.toggle('mode-chat', mode === 'chat');
@@ -1803,6 +1818,12 @@ function initializeEventListeners() {
       setMode('agent');
     });
     chatBtn.addEventListener('click', () => setMode('chat'));
+    if (overflowAgent) overflowAgent.addEventListener('click', () => {
+      const resChk = el('research-toggle');
+      if (resChk && resChk.checked) _syncResearchIndicator(false);
+      setMode('agent');
+    });
+    if (overflowChat) overflowChat.addEventListener('click', () => setMode('chat'));
     setMode(currentMode);
   })();
 
@@ -1838,36 +1859,47 @@ function initializeEventListeners() {
   }
 
   // ── Checkbox-backed toggle buttons (with per-mode persistence) ──
-  function setupToggle(btnId, checkboxId, stateKey) {
-    const btn = el(btnId);
-    if (!btn) return;
+  function setupToggle(btnIds, checkboxId, stateKey) {
+    const ids = Array.isArray(btnIds) ? btnIds : [btnIds];
+    const chk = el(checkboxId);
     // Restore per-mode saved state for both Agent and Chat modes.
     const mode = (loadToggleState().mode) || 'chat';
     const saved = loadToolPref(stateKey, mode);
-    const chk = el(checkboxId);
-    if (chk) chk.checked = saved;
-    btn.classList.toggle('active', saved);
-    btn.setAttribute('aria-pressed', String(saved));
-    btn.addEventListener('click', () => {
-      const curMode = (loadToggleState().mode) || 'chat';
-      const chk = el(checkboxId);
-      chk.checked = !chk.checked;
-      btn.classList.toggle('active', chk.checked);
-      btn.setAttribute('aria-pressed', String(chk.checked));
-      saveToolPref(stateKey, curMode, chk.checked);
-      showToolToggleToast(stateKey, chk.checked);
-      if (chk.checked) _showToolSplash(stateKey);
-      // Web search and Research are mutually exclusive — Research takes priority
-      if (stateKey === 'web' && chk.checked) {
-        const resChk = el('research-toggle');
-        if (resChk && resChk.checked) {
-          _syncResearchIndicator(false);
+    // Keep every button bound to this tool (standalone + overflow menu) in sync.
+    function _sync(checked) {
+      if (chk) chk.checked = checked;
+      ids.forEach((id) => {
+        const b = el(id);
+        if (!b) return;
+        b.classList.toggle('active', checked);
+        b.setAttribute('aria-pressed', String(checked));
+      });
+    }
+    _sync(saved);
+    ids.forEach((id) => {
+      const b = el(id);
+      if (!b) return;
+      b.addEventListener('click', () => {
+        const curMode = (loadToggleState().mode) || 'chat';
+        const next = !(chk ? chk.checked : false);
+        _sync(next);
+        saveToolPref(stateKey, curMode, next);
+        showToolToggleToast(stateKey, next);
+        if (next) _showToolSplash(stateKey);
+        // Web search and Research are mutually exclusive — Research takes priority
+        if (stateKey === 'web' && next) {
+          const resChk = el('research-toggle');
+          if (resChk && resChk.checked) {
+            _syncResearchIndicator(false);
+          }
         }
-      }
+        // Keep the "+" indicator dot in sync when a tool is toggled from the menu
+        try { document.dispatchEvent(new CustomEvent('overflow-state-change')); } catch (_) {}
+      });
     });
   }
-  setupToggle('web-toggle-btn', 'web-toggle', 'web');
-  setupToggle('bash-toggle-btn', 'bash-toggle', 'bash');
+  setupToggle(['web-toggle-btn', 'overflow-web-btn'], 'web-toggle', 'web');
+  setupToggle(['bash-toggle-btn', 'overflow-shell-btn'], 'bash-toggle', 'bash');
   try { workspaceModule.initWorkspace(); } catch (_) {}
 
   // Document editor toggle (special: uses module panel, not a checkbox)
@@ -1925,6 +1957,12 @@ function initializeEventListeners() {
     });
   }
 
+  // Mode-menu item IDs referenced by updatePlusDot. Declared up here (before
+  // the RAG-init call below) so it's initialized before _syncRagIndicator ->
+  // updatePlusDot runs on load — otherwise it's still in the Temporal Dead Zone
+  // and throws "Cannot access 'MODE_MENU_ITEM_IDS' before initialization",
+  // which aborts initializeEventListeners and leaves every later button dead.
+  const MODE_MENU_ITEM_IDS = ['overflow-agent-btn', 'overflow-chat-btn'];
   // ── RAG toggle (overflow + indicator) ──
   function _syncRagIndicator(active) {
     const indicator = el('rag-indicator-btn');
@@ -1954,11 +1992,13 @@ function initializeEventListeners() {
   }
 
   // ── Overflow "..." menu (Research) ──
+  // Agent/Chat mode items are always "active" (one of them is current), so they
+  // must not light the + dot — only real tools (Web, Shell, RAG, …) should.
   function updatePlusDot() {
     const plusBtn = el('overflow-plus-btn');
     if (!plusBtn) return;
     const menu = el('overflow-menu');
-    const anyActive = menu ? Array.from(menu.querySelectorAll('.overflow-menu-item.active')).some(item => item.style.display !== 'none') : false;
+    const anyActive = menu ? Array.from(menu.querySelectorAll('.overflow-menu-item.active')).some(item => !MODE_MENU_ITEM_IDS.includes(item.id) && item.style.display !== 'none') : false;
     plusBtn.classList.toggle('has-active', anyActive);
   }
   // External modules (compare) dispatch this when their overflow state changes
@@ -1966,6 +2006,40 @@ function initializeEventListeners() {
 
   // ── Prevent toolbar buttons from stealing focus (avoids mobile keyboard bounce) ──
   const chatInputBar = document.querySelector('.chat-input-bar');
+  // ── Menu tier (drives .mobile-only / .tablet-mobile-only visibility) ──
+  // The + menu is portaled to <body> while open, so it escapes the .chatbar
+  // container and @container queries / body-class rules can't reach it there.
+  // Instead we set an inline `display: … !important` directly on each item from
+  // JS, keyed off the composer bar width (matching the inline-button tiers:
+  // ≤420px mobile, ≤600px tablet, else desktop). Inline !important beats the
+  // CSS baseline and survives the portal, so the items are correct in both
+  // the closed (in-bar) and open (portaled) states.
+  const _tierTargets = [
+    { id: 'overflow-web-btn',   tiers: ['mobile'],          display: 'flex' },
+    { id: 'overflow-shell-btn', tiers: ['tablet', 'mobile'], display: 'flex' },
+    { id: 'overflow-agent-btn', tiers: ['mobile'],          display: 'flex' },
+    { id: 'overflow-chat-btn',  tiers: ['mobile'],          display: 'flex' },
+    { id: 'overflow-divider',   tiers: ['mobile'],          display: 'block' },
+  ];
+  function _tierForWidth(w) { return w <= 420 ? 'mobile' : w <= 600 ? 'tablet' : 'desktop'; }
+  let _tierRaf = null;
+  function applyMenuTier() {
+    const w = chatInputBar ? chatInputBar.clientWidth : window.innerWidth;
+    const tier = _tierForWidth(w);
+    _tierTargets.forEach(({ id, tiers, display }) => {
+      const t = document.getElementById(id);
+      if (!t) return;
+      if (tiers.includes(tier)) t.style.setProperty('display', display, 'important');
+      else t.style.removeProperty('display');
+    });
+  }
+  function _tierOnResize() {
+    if (_tierRaf) cancelAnimationFrame(_tierRaf);
+    _tierRaf = requestAnimationFrame(applyMenuTier);
+  }
+  window.addEventListener('resize', _tierOnResize);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', _tierOnResize);
+  applyMenuTier();
   // ── Keep textarea focused when interacting with chat bar controls (mobile keyboard fix) ──
   const _msgTextarea = el('message');
   if (chatInputBar && _msgTextarea) {
@@ -2055,8 +2129,7 @@ function initializeEventListeners() {
       menu.classList.remove('hidden');
       plusBtn.classList.add('expanded');
       document.body.appendChild(menu);  // escape the composer's container-type trap
-      // Hide pill bar label so it doesn't show through the menu
-      if (pickerWrap) pickerWrap.style.visibility = 'hidden';
+      applyMenuTier();                  // retag tier now that the menu is out of .chatbar
       // Keep the textarea focused so the keyboard stays up if it was open (the
       // pointerdown handler above prevents the focus-steal). Still watch
       // visualViewport so the menu follows the chevron if the viewport shifts.
@@ -2079,7 +2152,6 @@ function initializeEventListeners() {
       // scales back into the chevron) before flipping to display:none.
       menu.classList.add('closing');
       plusBtn.classList.remove('expanded');
-      if (pickerWrap) pickerWrap.style.visibility = '';
       // Item delays max at 0.18s + 0.20s anim = 0.38s for items, container
       // delay 0.16s + 0.22s = 0.38s. 400ms covers both with margin.
       setTimeout(() => {
@@ -2300,7 +2372,7 @@ function initializeEventListeners() {
     if (!inputTop || !pickerWrap) return;
 
     const PLACEHOLDER_COMPACT_WIDTH = 400;
-    const PICKER_HIDE_WIDTH = 220;
+    const PICKER_HIDE_WIDTH = 160;
     const TOOLBAR_HIDE_WIDTH = 160;
     const textarea = el('message');
     const inputBottom = document.querySelector('.chat-input-bottom');
@@ -2315,7 +2387,7 @@ function initializeEventListeners() {
       // Keep a prompt inside the composer even when the picker crowds the row.
       // A blank placeholder makes the mobile/compact empty state feel broken.
       if (textarea) {
-        textarea.setAttribute('placeholder', w < PLACEHOLDER_COMPACT_WIDTH ? 'Message...' : 'Message Odysseus...');
+        textarea.setAttribute('placeholder', w < PLACEHOLDER_COMPACT_WIDTH ? 'Message...' : 'Aigenchain...');
       }
       // Hide entire bottom toolbar (tools, mode toggle) — only send button remains
       if (inputBottom) {
@@ -2485,7 +2557,7 @@ function initializeEventListeners() {
         incognitoBtn.innerHTML = INCOGNITO_EYE_CLOSED + '<span class="incognito-label">Nobody</span>';
         if (welcomeName) {
           welcomeName.dataset.originalHtml = welcomeName.innerHTML;
-          welcomeName.innerHTML = '<svg class="welcome-boat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><line x1="8" y1="16" x2="16" y2="8"/><line x1="8" y1="8" x2="16" y2="16"/></svg>Nobody';
+          welcomeName.innerHTML = 'Nobody';
           // Restart the L→R clip-wipe reveal on the new label
           welcomeName.style.animation = 'none';
           welcomeName.offsetHeight;
@@ -2508,7 +2580,7 @@ function initializeEventListeners() {
         Storage.setJSON(Storage.KEYS.TOGGLES, beforeNobody);
         const _offIds = ['web-toggle', 'bash-toggle', 'research-toggle'];
         _offIds.forEach(id => { const c = el(id); if (c) c.checked = false; });
-        ['web-toggle-btn', 'bash-toggle-btn'].forEach(id => { const b = el(id); if (b) b.classList.remove('active'); });
+        ['web-toggle-btn', 'overflow-web-btn', 'bash-toggle-btn', 'overflow-shell-btn'].forEach(id => { const b = el(id); if (b) b.classList.remove('active'); });
         if (typeof window.__odysseusSetChatMode === 'function') {
           window.__odysseusSetChatMode('chat');
         } else {
@@ -2602,7 +2674,7 @@ function initializeEventListeners() {
 
   // Selector map: key → CSS selector(s) for targets
   const UI_VIS_MAP = {
-    'sidebar-brand':       '.sidebar-brand-title',
+    'sidebar-brand':       '.sidebar-brand-title, .sidebar-logo-mark',
     'sidebar-new-chat':    '#sidebar-new-chat-btn',
     'sidebar-search':      '#sidebar-search-btn',
     'sessions-section':    '#sessions-section',
@@ -3801,6 +3873,10 @@ function startOdysseusApp() {
   const _micIcon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
   const _stopIcon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
   const _newChatIcon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+  // Voice Call icon — shown in the Send button's empty state (swapped with the
+  // record-voice mic, which now lives in its own separate button).
+  const _callIcon = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="10" x2="4" y2="14"/><line x1="8" y1="6" x2="8" y2="18"/><line x1="12" y1="3" x2="12" y2="21"/><line x1="16" y1="6" x2="16" y2="18"/><line x1="20" y1="10" x2="20" y2="14"/></svg>';
+  const _callIconActive = '<svg class="call-bars-anim" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="10" x2="4" y2="14"/><line x1="8" y1="6" x2="8" y2="18"/><line x1="12" y1="3" x2="12" y2="21"/><line x1="16" y1="6" x2="16" y2="18"/><line x1="20" y1="10" x2="20" y2="14"/></svg>';
 
   // Expose icons globally so chat.js updateSubmitButton can use them
   window._odysseusBtnIcons = { send: _sendIcon, mic: _micIcon, stop: _stopIcon, newChat: _newChatIcon };
@@ -3808,6 +3884,67 @@ function startOdysseusApp() {
   function _isSttEnabled() {
     return voiceRecorderModule._sttProvider && voiceRecorderModule._sttProvider !== 'disabled';
   }
+
+  function _isCallSupported() {
+    return !!(window.SpeechRecognition || window.webkitSpeechRecognition) &&
+           (window._callEnabled !== false);
+  }
+
+  // Separate "Record voice" button — replaces the old dual-purpose mic on the
+  // Send button. Reuses the exact recording flow (voiceRecorderModule).
+  const micBtn = document.createElement('button');
+  micBtn.type = 'button';
+  micBtn.className = 'input-icon-btn mic-btn';
+  micBtn.id = 'mic-btn';
+  micBtn.title = 'Record voice';
+  micBtn.setAttribute('aria-label', 'Record voice');
+  micBtn.innerHTML = _micIcon;
+  const _rightCluster = document.querySelector('.chat-input-right');
+  const _sendBtnRef = _rightCluster ? _rightCluster.querySelector('.send-btn') : null;
+  if (_rightCluster && _sendBtnRef) _rightCluster.insertBefore(micBtn, _sendBtnRef);
+  else if (_rightCluster) _rightCluster.appendChild(micBtn);
+
+  function _startVoiceRecording() {
+    // The recording animation/state lives on the Record Voice button itself
+    // (micBtn), not on the Send button — the Send button's empty state shows
+    // the "Start voice call" icon and must keep its own animation untouched.
+    micBtn.innerHTML = _stopIcon;
+    micBtn.title = 'Stop recording';
+    micBtn.classList.add('recording');
+    voiceRecorderModule.startRecording(
+      (audioFile) => fileHandlerModule.addFiles([audioFile]),
+      uiModule.showToast,
+      uiModule.showError
+    );
+  }
+  function _updateMicBtnVisibility() {
+    if (!micBtn) return;
+    micBtn.style.display = _isSttEnabled() ? '' : 'none';
+    micBtn.classList.toggle('active', !!voiceRecorderModule.getIsRecording());
+  }
+  micBtn.addEventListener('click', () => {
+    // Ignore while a voice call is live.
+    if (window.callController && window.callController.isActive()) return;
+    if (voiceRecorderModule.getIsRecording()) voiceRecorderModule.stopRecording();
+    else _startVoiceRecording();
+  });
+
+  // Hook called by callController to reflect call state on the Send button.
+  window._odysseusCallUI = function (active) {
+    if (!sendBtn) return;
+    if (active) {
+      sendBtn.dataset.mode = 'call';
+      sendBtn.classList.add('call-active');
+      sendBtn.classList.remove('mic-mode', 'recording');
+      sendBtn.innerHTML = _callIconActive;
+      sendBtn.title = 'End voice call';
+    } else {
+      sendBtn.classList.remove('call-active');
+      sendBtn.dataset.mode = '';
+      _updateSendBtnIcon();
+    }
+    _updateMicBtnVisibility();
+  };
 
   function _hasAttachments() {
     return fileHandlerModule.getPendingCount && fileHandlerModule.getPendingCount() > 0;
@@ -3832,31 +3969,36 @@ function startOdysseusApp() {
 
   function _updateSendBtnIcon() {
     if (!sendBtn) return;
+    _updateMicBtnVisibility();
     if (sendBtn.dataset.mode === 'streaming') {
       _updateStreamingSubmitButton();
       return;
     }
-    // Don't override if recording
+    // Don't override while recording or in an ACTIVE call. Note: an idle,
+    // empty composer also carries dataset.mode === 'call' (the "Start voice
+    // call" icon). That state must stay overridable so typing swaps the icon
+    // to Send — only a live call (marked by the `call-active` class) is locked.
     if (sendBtn.dataset.mode === 'recording') return;
+    if (sendBtn.dataset.mode === 'call' && sendBtn.classList.contains('call-active')) return;
     const prevMode = sendBtn.dataset.mode || '';
     const hasText = messageInput && messageInput.value.trim().length > 0;
     const hasFiles = _hasAttachments();
     let newMode;
-    if (!hasText && !hasFiles && _isSttEnabled()) {
+    if (!hasText && !hasFiles && _isCallSupported()) {
       clearTimeout(sendBtn._collapseTimer);
-      sendBtn.innerHTML = _micIcon;
-      sendBtn.title = 'Record voice';
-      newMode = 'mic';
-      sendBtn.classList.add('mic-mode');
-      sendBtn.classList.remove('newchat-mode', 'newchat-expanded');
-    } else if (!hasText && !hasFiles && !_isSttEnabled()) {
+      sendBtn.innerHTML = _callIcon;
+      sendBtn.title = 'Start voice call';
+      newMode = 'call';
+      sendBtn.classList.add('call-mode');
+      sendBtn.classList.remove('newchat-mode', 'newchat-expanded', 'mic-mode');
+    } else if (!hasText && !hasFiles && (!_isSttEnabled() || !_isCallSupported())) {
       clearTimeout(sendBtn._collapseTimer);
       // Group chat: always show send button, never newchat mode
       if (groupModule && groupModule.isActive()) {
         sendBtn.innerHTML = _sendIcon;
         sendBtn.title = 'Send to group';
         newMode = 'idle';
-        sendBtn.classList.remove('mic-mode', 'newchat-mode', 'newchat-expanded');
+        sendBtn.classList.remove('mic-mode', 'newchat-mode', 'newchat-expanded', 'call-mode');
       } else {
       // Check if we're already on a fresh empty session (welcome screen visible)
       const isEmptySession = document.getElementById('chat-container')?.classList.contains('welcome-active');
@@ -3866,14 +4008,14 @@ function startOdysseusApp() {
         sendBtn.title = 'Send message';
         newMode = 'idle';
         sendBtn.classList.add('newchat-mode'); // muted gray style
-        sendBtn.classList.remove('mic-mode', 'newchat-expanded');
+        sendBtn.classList.remove('mic-mode', 'newchat-expanded', 'call-mode');
         clearTimeout(sendBtn._expandTimer);
       } else {
         sendBtn.innerHTML = _newChatIcon + '<span class="send-btn-label">+ New</span>';
         sendBtn.title = 'New chat';
         newMode = 'newchat';
         sendBtn.classList.add('newchat-mode');
-        sendBtn.classList.remove('mic-mode');
+        sendBtn.classList.remove('mic-mode', 'call-mode');
         // The button stays a 32px compact icon (no auto-expand to label —
         // the "+ New" label inside is for screen readers only; sighted users
         // see the spinning + on hover + the title tooltip).
@@ -3885,7 +4027,7 @@ function startOdysseusApp() {
       newMode = 'send';
       clearTimeout(sendBtn._expandTimer);
       const wasExpanded = sendBtn.classList.contains('newchat-expanded');
-      const wasNewchat = prevMode === 'newchat' || prevMode === 'mic';
+      const wasNewchat = prevMode === 'newchat' || prevMode === 'mic' || prevMode === 'call';
       if (wasExpanded || wasNewchat) {
         // Collapse pill if expanded, then spin arrow in (same as + spin-in)
         if (wasExpanded) sendBtn.classList.remove('newchat-expanded');
@@ -3894,14 +4036,14 @@ function startOdysseusApp() {
           if (sendBtn.dataset.mode !== 'send') return;
           sendBtn.innerHTML = _sendIcon;
           sendBtn.title = 'Send message';
-          sendBtn.classList.remove('mic-mode', 'newchat-mode', 'anim-spin-swap');
+          sendBtn.classList.remove('mic-mode', 'newchat-mode', 'anim-spin-swap', 'call-mode');
           sendBtn.classList.add('anim-spin');
           sendBtn.addEventListener('animationend', () => sendBtn.classList.remove('anim-spin'), { once: true });
         }, delay);
       } else {
         sendBtn.innerHTML = _sendIcon;
         sendBtn.title = 'Send message';
-        sendBtn.classList.remove('mic-mode', 'newchat-mode', 'newchat-expanded', 'anim-spin', 'anim-launch', 'anim-land');
+        sendBtn.classList.remove('mic-mode', 'newchat-mode', 'newchat-expanded', 'anim-spin', 'anim-launch', 'anim-land', 'call-mode');
       }
     }
     // Animate icon spin — when switching TO newchat or mic (the + or mic
@@ -3910,7 +4052,7 @@ function startOdysseusApp() {
     // string), which let the lingering anim-land class from the stop icon's
     // entry replay on the +, making it look like the + comes from below.
     // Never animate into send mode (arrow) — it should just appear instantly.
-    if (newMode !== prevMode && (newMode === 'newchat' || newMode === 'mic')) {
+    if (newMode !== prevMode && (newMode === 'newchat' || newMode === 'call')) {
       if (!sendBtn.classList.contains('anim-spin')) {
         sendBtn.classList.remove('anim-launch', 'anim-land');
         sendBtn.classList.add('anim-spin');
@@ -3927,6 +4069,13 @@ function startOdysseusApp() {
       // If recording, stop recording
       if (sendBtn.dataset.mode === 'recording' || voiceRecorderModule.getIsRecording()) {
         voiceRecorderModule.stopRecording();
+        return;
+      }
+
+      // If in call mode, start/stop the voice call (toggled via the Send button)
+      if (sendBtn.dataset.mode === 'call') {
+        if (window.callController && window.callController.isActive()) window.callController.stop();
+        else if (window.callController) window.callController.start();
         return;
       }
 
@@ -3956,24 +4105,19 @@ function startOdysseusApp() {
         return;
       }
 
-      // If input is empty and STT is enabled, start recording
-      if (!hasText && !hasFiles && _isSttEnabled()) {
-        sendBtn.innerHTML = _stopIcon;
-        sendBtn.title = 'Stop recording';
-        sendBtn.dataset.mode = 'recording';
-        sendBtn.classList.add('recording');
-        voiceRecorderModule.startRecording(
-          (audioFile) => fileHandlerModule.addFiles([audioFile]),
-          uiModule.showToast,
-          uiModule.showError
-        );
-        return;
-      }
-
-      // Otherwise, send message
+      // Otherwise, send message (voice recording is now triggered by the
+      // separate mic button, not the Send button)
       handleSubmit(e);
     });
   }
+
+  // Escape cancels an in-progress recording (discards the clip, leaves input untouched)
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && voiceRecorderModule.getIsRecording()) {
+      e.preventDefault();
+      voiceRecorderModule.cancelRecording();
+    }
+  });
 
   // Enter to send (shift+enter for newline), or new chat when empty
   if (messageInput) {
@@ -4003,20 +4147,19 @@ function startOdysseusApp() {
     });
   }
 
-  // Toggle mic/send icon on input change + hide model picker after enough text
+  // Toggle mic/send icon on input change. The model picker used to auto-hide
+  // after ~10 characters of typing, but users want the model select to stay
+  // visible at all times — so keep it shown and never toggle the autohide class.
   if (messageInput) {
     const _debouncedUpdateIcon = uiModule.debounce(_updateSendBtnIcon, 50);
-    const _MODEL_PICKER_HIDE_CHARS = 10;
     const _syncModelPickerAutohide = () => {
-      const hidePicker = (messageInput.value || '').replace(/\s/g, '').length >= _MODEL_PICKER_HIDE_CHARS;
       if (modelPickerWrap) {
-        modelPickerWrap.classList.toggle('model-picker-autohide', hidePicker);
+        modelPickerWrap.classList.remove('model-picker-autohide');
       }
     };
     window._syncModelPickerAutohide = _syncModelPickerAutohide;
     _syncModelPickerAutohide();
     messageInput.addEventListener('input', () => {
-      _syncModelPickerAutohide();
       if (sendBtn && sendBtn.dataset.mode === 'streaming') {
         _updateSendBtnIcon();
       } else {

@@ -31,8 +31,8 @@ class STTService:
         from src.settings import load_settings
         saved = load_settings()
         return {
-            "stt_enabled": saved.get("stt_enabled", False),
-            "stt_provider": saved.get("stt_provider", "disabled"),
+            "stt_enabled": saved.get("stt_enabled", True),
+            "stt_provider": saved.get("stt_provider", "local"),
             "stt_model": saved.get("stt_model", "base"),
             "stt_language": saved.get("stt_language", ""),
         }

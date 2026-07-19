@@ -9,6 +9,7 @@ import { sortModelIds } from './modelSort.js';
 import { providerLogo } from './providers.js';
 import { isAltGrEvent } from './platform.js';
 import { bindMenuDismiss } from './escMenuStack.js';
+import { initImageProviders } from './imageProviders.js';
 
 let initialized = false;
 let modalEl = null;
@@ -742,45 +743,71 @@ async function initTeacherModel() {
 
 /* ── Image Generation ── */
 async function initImageSettings() {
-  const modelSel = el('set-imgModelSelect');
+  const sizeSel = el('set-imgSizeSelect');
   const qualSel = el('set-imgQualitySelect');
+  const modelLabel = el('set-imgModelLabel');
+  const providerStatus = el('set-imgProviderStatus');
   const msg = el('set-imgSettingsMsg');
   const enabledToggle = el('set-imgEnabledToggle');
-  const configWrap = modelSel ? modelSel.closest('div[style*="flex-direction"]') : null;
-  try {
-    const modelsRes = await fetch('/api/models', { credentials: 'same-origin' });
-    const modelsData = await modelsRes.json();
-    // Inpaint-compat allowlist — image gen here is scoped to inpainting only,
-    // so DALL-E / GPT-Image-1 (no inpaint API) are excluded. Currently:
-    //   - any model with 'inpaint' in the id
-    //   - Stable Diffusion 3.5 Medium (inpaint via diffusers pipeline)
-    const _isInpaintModel = (mid) => {
-      const lower = String(mid || '').toLowerCase();
-      return lower.includes('inpaint')
-        || lower.includes('3.5-medium')
-        || lower.includes('3-5-medium')
-        || lower.includes('sd-3.5-med');
-    };
-    const imageModels = [];
-    (modelsData.items || []).forEach(item => {
-      (item.models || []).forEach(mid => {
-        if (_isInpaintModel(mid)) imageModels.push(mid);
-      });
-    });
-    sortModelIds(imageModels).forEach(mid => { const opt = document.createElement('option'); opt.value = mid; opt.textContent = mid; modelSel.appendChild(opt); });
-    // Hardcoded fallbacks shown as "(not detected)" so users know what to
-    // download/serve to enable inpaint here.
-    ['stable-diffusion-3.5-medium', 'stable-diffusion-inpainting'].forEach(mid => {
-      if (!imageModels.includes(mid)) { const opt = document.createElement('option'); opt.value = mid; opt.textContent = mid + ' (not detected)'; modelSel.appendChild(opt); }
-    });
-  } catch (e) { console.warn('Failed to load models for image settings', e); }
+  const configWrap = qualSel ? qualSel.closest('div[style*="flex-direction"]') : null;
+  let _activeModel = '';
+
+  // ── Load active Image API Provider status (AI Defaults → Image Generation) ──
+  async function loadProviderStatus() {
+    if (!providerStatus) return;
+    try {
+      const r = await fetch('/api/auth/image-providers', { credentials: 'same-origin' });
+      if (!r.ok) {
+        if (r.status === 403) {
+          providerStatus.innerHTML = '<span style="opacity:0.5;font-size:11px;">Managed by an administrator.</span>';
+        }
+        return;
+      }
+      const d = await r.json();
+      const providers = d.providers || [];
+      const active = providers.find(p => p.is_active);
+      const badge = (key) => {
+        const map = { cloudflare: 'Cloudflare', openai_compatible: 'OpenAI-compatible' };
+        return map[key] || key;
+      };
+      if (active) {
+        _activeModel = (active.config && active.config.model) || '';
+        providerStatus.innerHTML =
+          '<span style="width:8px;height:8px;border-radius:50%;background:var(--color-success,#50fa7b);display:inline-block;flex-shrink:0" title="Active"></span>' +
+          '<span style="font-weight:600;">' + esc(active.name || badge(active.provider)) + '</span>' +
+          '<span style="opacity:0.6;">·</span>' +
+          '<span style="opacity:0.75;font-size:11px;">' + esc(badge(active.provider)) + '</span>' +
+          (active.config && active.config.model ? '<span style="opacity:0.5;font-size:11px;">' + esc(active.config.model) + '</span>' : '') +
+          '<button type="button" class="admin-btn-sm" id="set-imgManageProviders" style="margin-left:auto;">Manage providers</button>';
+        const mp = el('set-imgManageProviders');
+        if (mp) mp.addEventListener('click', () => {
+          const sec = document.getElementById('image-providers-section');
+          if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+      } else {
+        providerStatus.innerHTML =
+          '<span style="opacity:0.6;font-size:11px;">No active image provider yet.</span>' +
+          '<button type="button" class="admin-btn-sm" id="set-imgManageProviders" style="margin-left:auto;">Add in Image API Providers</button>';
+        const mp = el('set-imgManageProviders');
+        if (mp) mp.addEventListener('click', () => {
+          const sec = document.getElementById('image-providers-section');
+          if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+      }
+    } catch (e) { console.warn('Failed to load image provider status', e); }
+  }
+
   try {
     const settingsRes = await fetch('/api/auth/settings', { credentials: 'same-origin' });
     const settings = await settingsRes.json();
-    if (settings.image_model) modelSel.value = settings.image_model;
-    if (settings.image_quality) qualSel.value = settings.image_quality;
+    if (settings.image_size && sizeSel) sizeSel.value = settings.image_size;
+    if (settings.image_quality && qualSel) qualSel.value = settings.image_quality;
+    if (settings.image_model) _activeModel = settings.image_model;
     if (enabledToggle) enabledToggle.checked = settings.image_gen_enabled === true;
   } catch (e) { console.warn('Failed to load settings', e); }
+
+  await loadProviderStatus();
+  if (modelLabel) modelLabel.textContent = _activeModel || '—';
 
   function syncImgDisabled() {
     var off = enabledToggle && !enabledToggle.checked;
@@ -793,12 +820,17 @@ async function initImageSettings() {
   async function saveSettings() {
     try {
       await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_gen_enabled: enabledToggle ? enabledToggle.checked : false, image_model: modelSel.value, image_quality: qualSel.value }) });
-      msg.textContent = 'Saved'; msg.style.color = 'var(--fg)'; setTimeout(() => { msg.textContent = ''; }, 2000);
-    } catch (e) { msg.textContent = 'Failed to save'; msg.style.color = 'var(--red)'; }
+        body: JSON.stringify({
+          image_gen_enabled: enabledToggle ? enabledToggle.checked : false,
+          image_model: _activeModel,
+          image_size: sizeSel ? sizeSel.value : '1024x1024',
+          image_quality: qualSel ? qualSel.value : 'medium',
+        }) });
+      if (msg) { msg.textContent = 'Saved'; msg.style.color = 'var(--fg)'; setTimeout(() => { msg.textContent = ''; }, 2000); }
+    } catch (e) { if (msg) { msg.textContent = 'Failed to save'; msg.style.color = 'var(--red)'; } }
   }
-  modelSel.addEventListener('change', saveSettings);
-  qualSel.addEventListener('change', saveSettings);
+  if (sizeSel) sizeSel.addEventListener('change', saveSettings);
+  if (qualSel) qualSel.addEventListener('change', saveSettings);
   if (enabledToggle) enabledToggle.addEventListener('change', function() { syncImgDisabled(); saveSettings(); });
 }
 
@@ -931,6 +963,9 @@ async function initTtsSettings() {
     var settingsRes = await fetch('/api/auth/settings', { credentials: 'same-origin' });
     var settings = await settingsRes.json();
     if (settings.tts_provider) provSel.value = settings.tts_provider;
+    if (settings.tts_provider === 'piper') {
+      voiceInput.placeholder = 'model name, e.g. id_ID-news_tts-medium';
+    }
     if (settings.tts_model) { modelSelect.value = settings.tts_model; modelInput.value = settings.tts_model; }
     if (settings.tts_voice) { voiceSelect.value = settings.tts_voice; voiceInput.value = settings.tts_voice; }
     if (settings.tts_speed) { speedSelect.value = settings.tts_speed; }
@@ -965,6 +1000,10 @@ async function initTtsSettings() {
     if (prov === 'local') voiceInput.value = 'af_heart';
     else if (isEndpoint()) { voiceSelect.value = 'alloy'; modelSelect.value = 'tts-1'; }
     else if (prov === 'browser') { voiceInput.value = ''; voiceInput.placeholder = 'OS default voice'; }
+    else if (prov === 'piper') {
+      voiceInput.value = voiceInput.value || 'id_ID-news_tts-medium';
+      voiceInput.placeholder = 'model name, e.g. id_ID-news_tts-medium';
+    }
     updateVisibility();
     saveTTS();
   });
@@ -1125,6 +1164,138 @@ async function initSttSettings() {
   modelInput.addEventListener('change', saveSTT);
   langInput.addEventListener('change', saveSTT);
   if (sttEnabledToggle) sttEnabledToggle.addEventListener('change', function() { syncSttDisabled(); saveSTT(); });
+}
+
+/* ── Voice Call ── */
+async function initCallSettings() {
+  var voiceSel = el('set-callVoiceSelect');
+  var speedSel = el('set-callSpeedSelect');
+  var callMsg = el('set-callSettingsMsg');
+  var callEnabledToggle = el('set-callEnabledToggle');
+  var callConfigWrap = el('set-callConfigWrap');
+  // Voice Call card was not rendered — bail.
+  if (!voiceSel) return;
+
+  // Globals consumed by callController.js (_enableCallTTS) so the selected
+  // voice + speed are applied the moment a call starts, even before the
+  // settings panel is ever opened. Defaults match DEFAULT_SETTINGS.
+  window._callEnabled = window._callEnabled !== false; // default ON
+  window._callVoice = (typeof window._callVoice === 'string') ? window._callVoice : '';
+  window._callSpeed = (typeof window._callSpeed === 'string') ? window._callSpeed : '1';
+
+  function populateVoices() {
+    if (!('speechSynthesis' in window) || !voiceSel) return;
+    var voices = window.speechSynthesis.getVoices();
+    // Preserve the currently-selected value across reloads.
+    var prev = voiceSel.value;
+    // Keep the first "Default (OS voice)" option, rebuild the rest.
+    voiceSel.length = 0;
+    var def = document.createElement('option');
+    def.value = ''; def.textContent = 'Default (OS voice)';
+    voiceSel.appendChild(def);
+    voices.forEach(function(v) {
+      var opt = document.createElement('option');
+      opt.value = v.name;
+      var lang = v.lang ? ' (' + v.lang + ')' : '';
+      opt.textContent = v.name + lang + (v.default ? ' ★' : '');
+      voiceSel.appendChild(opt);
+    });
+    if (prev) voiceSel.value = prev;
+  }
+
+  function syncCallDisabled() {
+    var off = callEnabledToggle && !callEnabledToggle.checked;
+    var card = callEnabledToggle ? callEnabledToggle.closest('.admin-card') : null;
+    if (card) card.style.opacity = off ? '0.45' : '';
+    if (callConfigWrap) callConfigWrap.style.pointerEvents = off ? 'none' : '';
+  }
+
+  // Browser voices load asynchronously (Chrome fires `voiceschanged`).
+  if ('speechSynthesis' in window) {
+    populateVoices();
+    if (typeof window.speechSynthesis.onvoiceschanged !== 'undefined') {
+      window.speechSynthesis.onvoiceschanged = populateVoices;
+    } else {
+      window.speechSynthesis.addEventListener('voiceschanged', populateVoices);
+    }
+  }
+
+  // Load saved settings.
+  try {
+    var settingsRes = await fetch('/api/auth/settings', { credentials: 'same-origin' });
+    var settings = await settingsRes.json();
+    if (settings.call_voice) voiceSel.value = settings.call_voice;
+    if (settings.call_speed) speedSel.value = String(settings.call_speed);
+    if (callEnabledToggle) callEnabledToggle.checked = settings.call_enabled !== false;
+    window._callVoice = settings.call_voice || '';
+    window._callSpeed = String(settings.call_speed || '1');
+    window._callEnabled = settings.call_enabled !== false;
+  } catch (e) { console.warn('Failed to load Voice Call settings', e); }
+
+  syncCallDisabled();
+
+  async function saveCall() {
+    try {
+      var enabled = callEnabledToggle ? callEnabledToggle.checked : true;
+      var voice = voiceSel.value;
+      var speed = speedSel.value || '1';
+      window._callEnabled = enabled;
+      window._callVoice = voice;
+      window._callSpeed = speed;
+      await fetch('/api/auth/settings', { method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ call_enabled: enabled, call_voice: voice, call_speed: speed }) });
+      callMsg.textContent = 'Saved'; callMsg.style.color = 'var(--fg)'; setTimeout(function() { callMsg.textContent = ''; }, 2000);
+      // Hide/show the Call icon on the Send button (parity with STT).
+      if (window._updateSendBtnIcon) window._updateSendBtnIcon();
+    } catch (e) { callMsg.textContent = 'Failed to save'; callMsg.style.color = 'var(--red)'; }
+  }
+
+  voiceSel.addEventListener('change', saveCall);
+  speedSel.addEventListener('change', saveCall);
+  if (callEnabledToggle) callEnabledToggle.addEventListener('change', function() { syncCallDisabled(); saveCall(); });
+
+  // Preview button — speaks a sample with the selected voice + speed.
+  var previewBtn = el('set-callPreviewBtn');
+  if (previewBtn) {
+    var previewPlaying = false;
+    function resetPreview() { previewPlaying = false; previewBtn.textContent = 'Preview'; previewBtn.style.borderColor = ''; }
+    previewBtn.addEventListener('click', async function() {
+      if (previewPlaying) {
+        window.speechSynthesis.cancel();
+        resetPreview(); return;
+      }
+      if (!('speechSynthesis' in window)) {
+        callMsg.textContent = 'Browser speech not supported'; callMsg.style.color = 'var(--red, #e55)';
+        setTimeout(function() { callMsg.textContent = ''; }, 2000); return;
+      }
+      var testText = 'Hi, this is how I will sound during our voice call.';
+      previewPlaying = true; previewBtn.textContent = 'Stop'; previewBtn.style.borderColor = 'var(--red, #e55)';
+      try {
+        var utt = new SpeechSynthesisUtterance(testText);
+        var voiceVal = voiceSel.value;
+        if (voiceVal) {
+          var voices = window.speechSynthesis.getVoices();
+          var target = voiceVal.toLowerCase();
+          var match = voices.find(function(v) { return v.name.toLowerCase() === target; }) ||
+                      voices.find(function(v) { return v.name.toLowerCase().includes(target); });
+          if (match) utt.voice = match;
+        }
+        utt.rate = parseFloat(speedSel.value) || 1;
+        await new Promise(function(resolve, reject) {
+          utt.onend = resolve;
+          utt.onerror = function(e) { reject(new Error('Browser TTS: ' + (e.error || 'error'))); };
+          window.speechSynthesis.cancel(); // stop any prior preview
+          window.speechSynthesis.speak(utt);
+        });
+      } catch (e) {
+        callMsg.textContent = 'Preview failed: ' + e.message; callMsg.style.color = 'var(--red, #e55)';
+        setTimeout(function() { callMsg.textContent = ''; }, 3000);
+      } finally {
+        resetPreview();
+      }
+    });
+  }
 }
 
 /* ═══════════════════════════════════════════
@@ -2330,6 +2501,7 @@ function initAll() {
   initVisionSettings();
   initTtsSettings();
   initSttSettings();
+  initCallSettings();
   initSearchSettings();
   initResearchSettings();
   initResearchSearchSettings();
@@ -2342,6 +2514,7 @@ function initAll() {
   initEmailAccountsSettings();
   initReminderSettings();
   initUnifiedIntegrations();
+  initImageProviders();
 }
 
 function notifyIntegrationsChanged() {
@@ -2574,7 +2747,7 @@ async function initReminderSettings() {
   // regardless of channel). The hint should make that clear so
   // users don't think they have to choose between channels.
   const CHANNEL_HINTS = {
-    browser: 'Reminders appear as browser notifications inside Odysseus.',
+    browser: 'Reminders appear as browser notifications inside Aigenchain.',
     email: 'Reminders are emailed and shown as a browser notification.',
     ntfy: 'Reminders are pushed via ntfy AND shown as a browser notification.',
     webhook: 'Reminders are POSTed to the selected integration AND shown as a browser notification. Use {{title}} and {{message}} in the payload template.',
@@ -2974,7 +3147,7 @@ async function initEmailAccountsSettings() {
     const eafProviderNotes = {
       outlook: {
         title: 'Outlook / Office 365 needs OAuth',
-        body: 'Microsoft disables normal password login for IMAP/SMTP in most Outlook and Microsoft 365 accounts. Odysseus does not support Microsoft OAuth/Graph mail yet, so this preset is only a placeholder for future support.',
+        body: 'Microsoft disables normal password login for IMAP/SMTP in most Outlook and Microsoft 365 accounts. Aigenchain does not support Microsoft OAuth/Graph mail yet, so this preset is only a placeholder for future support.',
       },
     };
     const eafNoteEl = el('eaf-provider-note');
@@ -3892,7 +4065,7 @@ async function initUnifiedIntegrations() {
       if (ntfyHint) {
         ntfyHint.style.display = isNtfy ? 'block' : 'none';
         if (isNtfy) {
-          ntfyHint.innerHTML = 'Enter the ntfy server URL Odysseus can reach. Examples: <code>http://127.0.0.1:8091</code>, <code>http://100.x.y.z:8091</code>, or <code>https://ntfy.example.com</code>.';
+          ntfyHint.innerHTML = 'Enter the ntfy server URL Aigenchain can reach. Examples: <code>http://127.0.0.1:8091</code>, <code>http://100.x.y.z:8091</code>, or <code>https://ntfy.example.com</code>.';
         }
       }
       if (url) {
@@ -4492,7 +4665,7 @@ async function initUnifiedIntegrations() {
       },
       outlook: {
         title: 'Outlook / Office 365 needs OAuth',
-        body: 'Microsoft disables normal password login for IMAP/SMTP in most Outlook and Microsoft 365 accounts. Odysseus does not support Microsoft OAuth/Graph mail yet, so this preset is only a placeholder for future support.',
+        body: 'Microsoft disables normal password login for IMAP/SMTP in most Outlook and Microsoft 365 accounts. Aigenchain does not support Microsoft OAuth/Graph mail yet, so this preset is only a placeholder for future support.',
         url: 'https://learn.microsoft.com/exchange/clients-and-mobile-in-exchange-online/disable-basic-authentication-in-exchange-online',
         linkLabel: 'Read Microsoft note',
       },
@@ -5312,7 +5485,7 @@ async function initUnifiedIntegrations() {
               </button>
             </div>
             <div id="uf-codex-config-body" style="display:none;">
-              <div style="font-size:11px;opacity:0.62;margin:4px 0 6px;">Toggle which Odysseus tools this agent can use. New agents start with chat only.</div>
+              <div style="font-size:11px;opacity:0.62;margin:4px 0 6px;">Toggle which Aigenchain tools this agent can use. New agents start with chat only.</div>
               <div id="uf-codex-inline-scopes"></div>
             </div>
           </div>

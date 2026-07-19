@@ -156,12 +156,11 @@ export function initSidebarLayout(Storage, opts) {
           sidebar.classList.add('hidden');
           if (backdrop) backdrop.classList.remove('visible');
         } else {
-          // Mobile: the hamburger always opens the sidebar from the RIGHT.
-          // (Not persisted — keeps the desktop side preference untouched.)
-          if (!sidebar.classList.contains('right-side')) {
-            sidebar.classList.add('right-side');
-            if (documentModule && documentModule.swapSide) { try { documentModule.swapSide(); } catch (_) {} }
-          }
+          // Mobile: open the sidebar on its current side — this matches the
+          // desktop/tablet side preference (default LEFT), so the mobile drawer
+          // "relates" to the larger layouts. We deliberately no longer force
+          // right-side here: forcing it made the show-sidebar icon jump from the
+          // left corner to the right corner on open. Now it stays put.
           // Opening sidebar — blur keyboard first, then open after layout settles
           if (document.activeElement && document.activeElement !== document.body
               && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
@@ -537,16 +536,14 @@ function _initChatSwipeToOpenSidebar() {
     if (e.cancelable) e.preventDefault();
     if (adx >= 40) {
       track = false;
-      // Direction picks the side (per user preference): swipe LEFT → sidebar
-      // on the left, swipe RIGHT → sidebar on the right. dx<0 is a leftward
-      // finger motion; mapping it to 'right' (and dx>0 to 'left') is what makes
-      // it feel correct in practice.
-      const side = dx < 0 ? 'right' : 'left';
+      // Open the sidebar on its current side (matches the desktop/tablet
+      // preference — default LEFT). Any horizontal swipe in the chat view
+      // reveals it; we no longer pick a side from the swipe direction.
       // Use the deliberate-open helper (sets _userToggledSidebar so the
       // auto-collapse observer doesn't instantly re-hide it). Fall back to a
       // plain unhide if the helper isn't wired yet.
       if (typeof window._odyOpenSidebar === 'function') {
-        window._odyOpenSidebar(side);
+        window._odyOpenSidebar();
       } else {
         const sb = document.getElementById('sidebar');
         if (sb) { sb.classList.remove('hidden'); try { syncRailSide(); } catch (_) {} }

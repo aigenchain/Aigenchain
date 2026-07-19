@@ -35,8 +35,13 @@ def _patch_generation(monkeypatch, image_url):
 
     import httpx
     import src.settings as settings
+    from src import image_providers
 
     monkeypatch.setattr(settings, "load_settings", lambda: {})
+    # These tests exercise the OpenAI/DALL-E URL-download path. Ensure no admin
+    # image provider is active so generation falls through to that path instead
+    # of the provider (base64) short-circuit.
+    monkeypatch.setattr(image_providers, "get_active_provider", lambda: None)
     monkeypatch.setattr(httpx, "AsyncClient", _AsyncClient)
     monkeypatch.setattr(
         ai_interaction,

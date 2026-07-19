@@ -2997,6 +2997,19 @@ async def stream_agent_loop(
     if _relevant_tools is not None:
         logger.info("[agent-intent] selected_tools=%s", sorted(_relevant_tools)[:50])
 
+    # Observability (Tahap 2): surface the selected tool set + intent domains so
+    # the route can persist them in router_decisions. Emitted as a dedicated SSE
+    # event that the frontend ignores (unknown type) — the chat route consumes
+    # and swallows it, keeping the streaming contract unchanged.
+    try:
+        yield "data: " + json.dumps({
+            "type": "router_meta",
+            "selected_tools": sorted(_relevant_tools) if _relevant_tools else [],
+            "domains": sorted(_intent.get("domains") or []),
+        }) + "\n\n"
+    except Exception:
+        pass
+
     prep_timings["tool_selection"] = time.time() - _t1
 
     _t2 = time.time()

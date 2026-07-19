@@ -253,6 +253,96 @@ def setup_gallery_routes() -> APIRouter:
         finally:
             db.close()
 
+    # ---- POST /api/image/generate — text-to-image via active Image API Provider ----
+    @router.post("/api/image/generate")
+    async def image_generate(request: Request):
+        """Generate an image from a text prompt using the active Image API
+        Provider (e.g. Cloudflare Workers AI). The result is saved to the
+        gallery library so it shows up alongside uploaded/AI photos.
+
+        Body: { "prompt": str, "size": "1024x1024", "quality": "medium" }
+        """
+        import base64 as _b64
+        from io import BytesIO
+
+        from src import image_providers as _ip
+
+        user = require_privilege(request, "can_generate_images")
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(400, "Invalid JSON body")
+        prompt = (body.get("prompt") or "").strip()
+        if not prompt:
+            raise HTTPException(400, "prompt is required")
+        size = (body.get("size") or "1024x1024").strip() or "1024x1024"
+        quality = (body.get("quality") or "medium").strip() or "medium"
+
+        provider = _ip.get_active_provider()
+        if not provider:
+            raise HTTPException(
+                400,
+                "No active image provider. Add one in Settings → Image API Providers.",
+            )
+
+        try:
+            raw = _ip.generate_via_provider(
+                provider, prompt, size=size, quality=quality, timeout=300.0
+            )
+        except ValueError as exc:
+            raise HTTPException(502, f"Image generation failed: {str(exc)[:280]}")
+        except Exception as exc:  # defensive — never leak internals
+            logger.exception("image_generate: provider call failed")
+            raise HTTPException(502, f"Image generation failed: {str(exc)[:280]}")
+
+        # generate_via_provider returns base64 text; tolerate raw bytes too.
+        if isinstance(raw, str):
+            try:
+                img_bytes = _b64.b64decode(raw)
+            except Exception:
+                raise HTTPException(502, "Image generation returned invalid image data")
+        else:
+            img_bytes = raw
+        if not img_bytes:
+            raise HTTPException(502, "Image generation returned empty image data")
+
+        img_dir = Path(GENERATED_IMAGES_DIR)
+        img_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{uuid.uuid4().hex[:12]}.png"
+        (img_dir / filename).write_bytes(img_bytes)
+
+        # Best-effort dimensions for the gallery row.
+        width = height = None
+        try:
+            from PIL import Image as _PILImage
+            with _PILImage.open(BytesIO(img_bytes)) as _im:
+                width, height = _im.size
+        except Exception:
+            pass
+
+        model = provider.get("config", {}).get("model") or provider.get("provider", "")
+        db = SessionLocal()
+        try:
+            img_id = str(uuid.uuid4())
+            db.add(GalleryImage(
+                id=img_id,
+                filename=filename,
+                prompt=prompt,
+                model=model,
+                size=size,
+                quality=quality,
+                owner=user,
+                file_size=len(img_bytes),
+                width=width,
+                height=height,
+            ))
+            db.commit()
+            row = db.query(GalleryImage).filter(GalleryImage.id == img_id).first()
+            result = _image_to_dict(row)
+        finally:
+            db.close()
+        return {"ok": True, "image": result}
+
     # ---- POST /api/gallery/{id}/replace ----
     @router.post("/api/gallery/{image_id}/replace")
     async def gallery_replace(request: Request, image_id: str):

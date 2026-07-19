@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model picker — default animated icon references</title>
+<style>
+  :root { color-scheme: dark; --fg: #e6e6e6; --panel: #1a1d23; --border: #2a2e36; --accent: #9b6dcc; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 40px;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #0f1115; color: var(--fg);
+  }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  p.sub { color: #9aa0a6; margin: 0 0 28px; font-size: 13px; max-width: 640px; line-height: 1.5; }
+  .section-title { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: #9aa0a6; margin: 28px 0 14px; }
+
+  /* ── Chip = the model-picker wrapper (32×32, radius 8, accent fill, fg icon) ── */
+  .chip {
+    display: flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; border-radius: 8px;
+    background: var(--accent);
+    color: var(--fg);
+    flex-shrink: 0;
+  }
+  /* Larger chip for clear inspection (same language as call-icon-preview.html) */
+  .chip-lg {
+    width: 48px; height: 48px; border-radius: 10px;
+    background: var(--panel); border: 1px solid var(--border);
+    color: var(--accent);
+  }
+  .ai-icon { width: 16px; height: 16px; display: block; }
+  .ai-icon-lg { width: 24px; height: 24px; display: block; }
+
+  .row { display: flex; gap: 36px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 10px; padding-bottom: 24px; border-bottom: 1px solid #222; }
+  .cell { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .cell .name { font-size: 12px; color: #9aa0a6; letter-spacing: .02em; }
+  .cell .tag { font-size: 11px; color: #6f7681; }
+
+  /* ── Animations (all currentColor, theme-adaptive) ── */
+  .sparkle { transform-box: fill-box; transform-origin: center; animation: twk 2.6s ease-in-out infinite; }
+  @keyframes twk { 0%,100% { transform: scale(.82) rotate(-10deg); opacity:.78 } 50% { transform: scale(1.12) rotate(10deg); opacity:1 } }
+
+  .pc-core { transform-box: fill-box; transform-origin: center; animation: breathe 2.2s ease-in-out infinite; }
+  .pc-halo { transform-box: fill-box; transform-origin: center; animation: ping 2.2s ease-out infinite; }
+  @keyframes breathe { 0%,100% { transform: scale(1) } 50% { transform: scale(1.22) } }
+  @keyframes ping { 0% { transform: scale(.5); opacity:.85 } 70% { opacity:0 } 100% { transform: scale(1.8); opacity:0 } }
+
+  .orbit { transform-box: view-box; transform-origin: 12px 12px; animation: spin 5s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .ripple.r2, .ripple.r3 { transform-box: fill-box; transform-origin: center; animation: rping 2.4s ease-out infinite; }
+  .ripple.r3 { animation-delay: 1.2s; }
+  @keyframes rping { 0% { transform: scale(.5); opacity:.9 } 80% { opacity:0 } 100% { transform: scale(1.9); opacity:0 } }
+
+  .hex { transform-box: fill-box; transform-origin: center; animation: spin 9s linear infinite; }
+
+  /* ── Composer context mock ── */
+  .composer {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px; border-radius: 12px;
+    background: #16191f; border: 1px solid #222;
+    max-width: 520px; margin-top: 8px;
+  }
+  .composer .plus {
+    width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: none; border: 1px solid #2a2e36; color: #9aa0a6;
+  }
+  .composer .field { flex: 1; height: 32px; display: flex; align-items: center; padding: 0 6px; color: #6f7681; font-size: 13px; }
+  .composer .send {
+    width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent); color: #fff; border: none;
+  }
+
+  .code {
+    background: #16191f; border: 1px solid #222; border-radius: 10px;
+    padding: 12px 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px; color: #c8d0da; white-space: pre; overflow-x: auto; line-height: 1.5;
+    max-width: 520px; margin-top: 6px;
+  }
+  .codelbl { font-size: 11px; color: #6f7681; margin: 14px 0 2px; }
+
+  /* light-theme card to show theme-adaptive currentColor */
+  .light-card { background: #f4f5f7; border:1px solid #e2e4e8; border-radius: 12px; padding: 18px; margin-top: 16px; display:inline-flex; gap: 18px; }
+  .light-card .chip { background: var(--accent); color: #1a1a1a; }
+  .light-card .chip-lg { background: #fff; border:1px solid #d8dbe0; color: var(--accent); }
+  .light-card .name { color:#5a6068; }
+</style>
+</head>
+<body>
+  <h1>Model picker — default animated icon (references)</h1>
+  <p class="sub">All candidates use the same visual language as the Voice-Call icon: 24×24 viewBox,
+     <code>fill:none; stroke=currentColor; stroke-width:2; round caps</code>, animated with CSS only.
+     They use <code>currentColor</code>, so they adapt to light/dark themes and never vanish (unlike the
+     forced-white provider glyphs). Pick ONE to become the permanent default — the selected model no longer
+     shows its own brand icon.</p>
+
+  <div class="section-title">Candidates — actual size (32px chip, 16px icon)</div>
+  <div class="row">
+    <div class="cell"><div class="chip">
+      <svg class="ai-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path class="sparkle" d="M12 2.5c.4 4.3 2.2 6.1 6.5 6.5-4.3.4-6.1 2.2-6.5 6.5-.4-4.3-2.2-6.1-6.5-6.5 4.3-.4 6.1-2.2 6.5-6.5z"/></svg>
+    </div><div class="name">A · Sparkle</div></div>
+
+    <div class="cell"><div class="chip">
+      <svg class="ai-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle class="pc-halo" cx="12" cy="12" r="5"/><circle class="pc-core" cx="12" cy="12" r="3.4" fill="currentColor" stroke="none"/></svg>
+    </div><div class="name">B · Pulse Core</div></div>
+
+    <div class="cell"><div class="chip">
+      <svg class="ai-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/><g class="orbit"><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(28 12 12)"/><circle cx="21" cy="12" r="2.1" fill="currentColor" stroke="none"/></g></svg>
+    </div><div class="name">C · Orbit</div></div>
+
+    <div class="cell"><div class="chip">
+      <svg class="ai-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/><circle class="ripple r2" cx="12" cy="12" r="3.4"/><circle class="ripple r3" cx="12" cy="12" r="3.4"/></svg>
+    </div><div class="name">D · Radar Ping</div></div>
+
+    <div class="cell"><div class="chip">
+      <svg class="ai-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon class="hex" points="12 3 20.2 7.5 20.2 16.5 12 21 3.8 16.5 3.8 7.5"/><circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none"/></svg>
+    </div><div class="name">E · Aperture</div></div>
+  </div>
+
+  <div class="section-title">Same candidates — larger (48px chip, 24px icon) for detail</div>
+  <div class="row">
+    <div class="cell"><div class="chip-lg">
+      <svg class="ai-icon-lg" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path class="sparkle" d="M12 2.5c.4 4.3 2.2 6.1 6.5 6.5-4.3.4-6.1 2.2-6.5 6.5-.4-4.3-2.2-6.1-6.5-6.5 4.3-.4 6.1-2.2 6.5-6.5z"/></svg>
+    </div><div class="name">A · Sparkle</div></div>
+    <div class="cell"><div class="chip-lg">
+      <svg class="ai-icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle class="pc-halo" cx="12" cy="12" r="5"/><circle class="pc-core" cx="12" cy="12" r="3.4" fill="currentColor" stroke="none"/></svg>
+    </div><div class="name">B · Pulse Core</div></div>
+    <div class="cell"><div class="chip-lg">
+      <svg class="ai-icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/><g class="orbit"><ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(28 12 12)"/><circle cx="21" cy="12" r="2.1" fill="currentColor" stroke="none"/></g></svg>
+    </div><div class="name">C · Orbit</div></div>
+    <div class="cell"><div class="chip-lg">
+      <svg class="ai-icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/><circle class="ripple r2" cx="12" cy="12" r="3.4"/><circle class="ripple r3" cx="12" cy="12" r="3.4"/></svg>
+    </div><div class="name">D · Radar Ping</div></div>
+    <div class="cell"><div class="chip-lg">
+      <svg class="ai-icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon class="hex" points="12 3 20.2 7.5 20.2 16.5 12 21 3.8 16.5 3.8 7.5"/><circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none"/></svg>
+    </div><div class="name">E · Aperture</div></div>
+  </div>
+
+  <div class="section-title">In composer context (next to + and Send)</div>
+  <div class="composer">
+    <div class="chip">
+      <svg class="ai-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path class="sparkle" d="M12 2.5c.4 4.3 2.2 6.1 6.5 6.5-4.3.4-6.1 2.2-6.5 6.5-.4-4.3-2.2-6.1-6.5-6.5 4.3-.4 6.1-2.2 6.5-6.5z"/></svg>
+    </div>
+    <div class="plus"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 15 12 9 18 15"/></svg></div>
+    <div class="field">Aigenchain…</div>
+    <div class="send"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></div>
+  </div>
+  <p class="sub" style="margin-top:8px">↑ shown with candidate <b>A · Sparkle</b>; the same chip works for any pick.</p>
+
+  <div class="section-title">Light theme (currentColor adapts)</div>
+  <div class="light-card">
+    <div class="cell"><div class="chip">
+      <svg class="ai-icon" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path class="sparkle" d="M12 2.5c.4 4.3 2.2 6.1 6.5 6.5-4.3.4-6.1 2.2-6.5 6.5-.4-4.3-2.2-6.1-6.5-6.5 4.3-.4 6.1-2.2 6.5-6.5z"/></svg>
+    </div><div class="name">A</div></div>
+    <div class="cell"><div class="chip-lg">
+      <svg class="ai-icon-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle class="pc-halo" cx="12" cy="12" r="5"/><circle class="pc-core" cx="12" cy="12" r="3.4" fill="currentColor" stroke="none"/></svg>
+    </div><div class="name">B</div></div>
+  </div>
+
+  <div class="section-title">SVG markup (copy the one you pick)</div>
+
+  <div class="codelbl">A · Sparkle</div>
+  <div class="code">&lt;svg viewBox="0 0 24 24" fill="currentColor" stroke="none"&gt;
+  &lt;path class="ai-sparkle" d="M12 2.5c.4 4.3 2.2 6.1 6.5 6.5-4.3.4-6.1 2.2-6.5 6.5-.4-4.3-2.2-6.1-6.5-6.5 4.3-.4 6.1-2.2 6.5-6.5z"/&gt;
+&lt;/svg&gt;</div>
+
+  <div class="codelbl">B · Pulse Core</div>
+  <div class="code">&lt;svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"&gt;
+  &lt;circle class="ai-pc-halo" cx="12" cy="12" r="5"/&gt;
+  &lt;circle class="ai-pc-core" cx="12" cy="12" r="3.4" fill="currentColor" stroke="none"/&gt;
+&lt;/svg&gt;</div>
+
+  <div class="codelbl">C · Orbit</div>
+  <div class="code">&lt;svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"&gt;
+  &lt;circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/&gt;
+  &lt;g class="ai-orbit"&gt;
+    &lt;ellipse cx="12" cy="12" rx="9" ry="3.6" transform="rotate(28 12 12)"/&gt;
+    &lt;circle cx="21" cy="12" r="2.1" fill="currentColor" stroke="none"/&gt;
+  &lt;/g&gt;
+&lt;/svg&gt;</div>
+
+  <div class="codelbl">D · Radar Ping</div>
+  <div class="code">&lt;svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"&gt;
+  &lt;circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/&gt;
+  &lt;circle class="ai-ripple r2" cx="12" cy="12" r="3.4"/&gt;
+  &lt;circle class="ai-ripple r3" cx="12" cy="12" r="3.4"/&gt;
+&lt;/svg&gt;</div>
+
+  <div class="codelbl">E · Aperture</div>
+  <div class="code">&lt;svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"&gt;
+  &lt;polygon class="ai-hex" points="12 3 20.2 7.5 20.2 16.5 12 21 3.8 16.5 3.8 7.5"/&gt;
+  &lt;circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none"/&gt;
+&lt;/svg&gt;</div>
+
+  <p class="sub" style="margin-top:24px">Open this file in a browser. Tell me which letter (A–E) you want as the permanent default,
+     and I'll wire it into <code>modelPicker.js</code> (always shown, instead of the per-model brand glyph) + add the matching keyframes to <code>style.css</code>.</p>
+</body>
+</html>

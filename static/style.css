@@ -17,16 +17,16 @@
 
 :root {
   /* Core palette */
-  --bg: #282c34;
-  --fg: #9cdef2;
-  --panel: #111;
-  --border: #355a66;
-  --red: #e06c75;
+  --bg: #f3eef8;
+  --fg: #3d3551;
+  --panel: #faf7ff;
+  --border: #cec3de;
+  --red: #9b6dcc;
   /* Were `var(--green)` / `var(--warn)` — self-referential, so they
      resolved to invalid and every site fell back to its own literal
      (or, for sites with no fallback, painted as transparent/inherit).
      Anchor them to real hex so the token layer actually works. */
-  --green: #50fa7b;
+  --green: #7cb871;
   --warn: #f0ad4e;
 
   /* Syntax highlighting */
@@ -607,6 +607,27 @@ body.bg-pattern-sparkles {
       position: relative;
       top: 0;
       left: -10px;
+    }
+    /* Brand logo mark — theme-adaptive via CSS mask + brand gradient.
+       The white/silver AigenchainLogo.svg is recolored to the active theme
+       (--brand-color → --fg gradient) so it reads on both dark and light
+       themes without a separate asset per theme. */
+    .brand-logo-mark {
+      display: inline-block;
+      flex-shrink: 0;
+      background: linear-gradient(135deg, var(--brand-color, var(--red)), color-mix(in srgb, var(--brand-color, var(--red)) 60%, var(--fg)));
+      -webkit-mask: url('/static/icons/AigenchainLogo.svg') no-repeat center / contain;
+              mask: url('/static/icons/AigenchainLogo.svg') no-repeat center / contain;
+    }
+    .sidebar-logo-mark {
+      width: 92px;
+      height: 20px;
+      margin-left: -10px;
+    }
+    .welcome-logo-mark {
+      width: 220px;
+      height: 48px;
+      margin-bottom: 10px;
     }
     .sidebar-sep {
       display: none;
@@ -2107,6 +2128,12 @@ body.bg-pattern-sparkles {
     .msg .role.has-logo::before { display: none; }
     .role-provider-logo { display: inline-flex; align-items: center; flex-shrink: 0; }
     .role-provider-logo svg { width: 12px; height: 12px; }
+
+    /* Hide the model-name label inside AI replies (e.g. "deepseek-v4-flash-free
+       16.13"). Replies then show only the text answer / generated image — the
+       "view thinking process" block lives in .body, so it is preserved. User
+       messages ("You") keep their label. */
+    .msg-ai > .role { display: none; }
     .msg-user .role {
       color: color-mix(in srgb, var(--fg) 60%, transparent);
     }
@@ -2354,27 +2381,16 @@ body.bg-pattern-sparkles {
       border-radius: 16px;
       padding: 10px 12px;
       display: flex;
-      flex-direction: column;
+      flex-direction: row;
+      align-items: flex-end;
       gap: 8px;
+      position: relative;
       max-width: 800px;
       margin-left: auto;
       margin-right: auto;
       width: 100%;
     }
-    .chat-input-top {
-      width: 100%;
-      position: relative;
-    }
-    .chat-input-top > .model-picker-wrap {
-      position: absolute;
-      top: 0;
-      right: 0;
-      z-index: 250;
-      transform-origin: top right;
-      transition: opacity 0.22s ease, transform 0.22s ease;
-      will-change: opacity, transform;
-    }
-    .chat-input-top > .model-picker-wrap.model-picker-autohide {
+    .model-picker-wrap.model-picker-autohide {
       opacity: 0;
       pointer-events: none;
       transform: translateY(-4px) scale(0.96);
@@ -2388,8 +2404,10 @@ body.bg-pattern-sparkles {
       white-space: pre-wrap;
       overflow-wrap: break-word;
       font-family: inherit;
-      font-size: 14px;
-      line-height: 1.5;
+      /* Match the #message textarea (font-size:13px, line-height:34px) exactly
+         so the autocomplete/suggestion highlight overlays the typed text. */
+      font-size: 13px;
+      line-height: 34px;
       padding: 0;
       border: 1px solid transparent;
       color: transparent;
@@ -2399,7 +2417,14 @@ body.bg-pattern-sparkles {
       color: color-mix(in srgb, var(--fg) 30%, transparent);
     }
     .chat-input-bar textarea#message {
-      width: 100%;
+      /* Be the single flexible element in the row and allow shrinking below
+         content size (min-width:0). Without this, a long unbroken string grows
+         the textarea's intrinsic width and squeezes the flex siblings — the
+         model picker chip then clips/vanishes as the user types. */
+      flex: 1 1 0;
+      width: auto;
+      min-width: 0;
+      overflow-wrap: anywhere;
       background: transparent;
       border: none;
       outline: none;
@@ -2416,32 +2441,61 @@ body.bg-pattern-sparkles {
     .chat-input-bar textarea#message::placeholder {
       color: color-mix(in srgb, var(--fg) 35%, transparent);
     }
-    .chat-input-bottom {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-top: 4px;
-    }
     /* Progressive shrinkage: as the chat input bar gets narrow, sacrifice
        chrome before the typing area. First the Agent/Chat toggle drops out,
        then the model picker — textarea + send button always stay. Container
        queries so it responds to *bar width*, not viewport width (the bar
        can be in a split pane). */
     .chat-input-bar { container-type: inline-size; container-name: chatbar; }
-    @container chatbar (max-width: 340px) {
+    /* Adaptive single-row composer (desktop / tablet / mobile tiers).
+       Secondary controls "demote" into the + (overflow) menu instead of
+       disappearing, so the row stays one line and the textarea keeps the
+       remaining width. These !important rules win over the inline display
+       set by the mode handlers (applyModeToToggles / set_mode). */
+    /* Tablet tier: Shell is a power-user tool — drop the inline shortcut
+       (still reachable inside the + menu). */
+    @container chatbar (max-width: 600px) {
+      #bash-toggle-btn { display: none !important; }
+    }
+    /* Mobile tier: also drop Web search + the Agent/Chat toggle. Row becomes
+       [+] [model] [textarea] [send]. */
+    @container chatbar (max-width: 420px) {
+      #web-toggle-btn { display: none !important; }
       .chat-input-right .mode-toggle { display: none !important; }
     }
-    @container chatbar (max-width: 260px) {
+    /* Overflow menu items that mirror a demoted inline control. Hidden by
+       default; revealed per tier. The actual show/hide is set as an inline
+       `display: … !important` on each item by applyMenuTier() in app.js, keyed
+       off the composer bar width. Inline !important beats this baseline and
+       works whether the menu is inside .chatbar or portaled to <body> while
+       open:
+         - mobile-only        → Web search + Agent/Chat mode (inline hidden ≤420px)
+         - tablet-mobile-only → Shell (inline hidden ≤600px, stays reachable on tablet) */
+    .mobile-only,
+    .tablet-mobile-only { display: none !important; }
+    .overflow-divider {
+      height: 1px;
+      background: color-mix(in srgb, var(--fg) 12%, transparent);
+      margin: 6px 12px;
+    }
+    /* Only hide the model picker on extremely narrow screens. */
+    @container chatbar (max-width: 200px) {
       #model-picker-wrap { display: none !important; }
     }
     .chat-input-left {
       display: flex;
-      gap: 4px;
+      /* Same gap the bar uses between the model picker and this group, so the
+         spacing between Select-model, More-tools, Web-search and Shell is even. */
+      gap: 8px;
       align-items: center;
       flex-wrap: nowrap;
       overflow: hidden;
       min-width: 0;
-      flex: 1;
+      /* Vertically center the tools group (web/shell/record/call) in the
+         bar so its icons line up with the Agent/Chat + Send cluster
+         on the right (the reference the input text is also centered to). */
+      align-self: center;
+      flex: 0 1 auto;
     }
     /* Collapsible buttons shrink away; collapsed ones disappear */
     .chat-input-left > .input-icon-btn {
@@ -2464,11 +2518,32 @@ body.bg-pattern-sparkles {
       margin: 0 2px;
       flex-shrink: 0;
     }
+    .chat-input-center {
+      position: relative;
+      flex: 1 1 auto;
+      min-width: 0;
+      display: flex;
+      /* Stop the textarea from stretching to the bar's full height
+         (default align-items:stretch) — that pinned the placeholder
+         text to the TOP of a tall bar, above the centered
+         Agent/Chat label. Center it at its natural height. */
+      align-items: center;
+      /* Vertically center the composer with the side icons instead of
+         letting align-items:flex-end pin it to the bottom (which made it
+         sit lower than the left/right icon buttons). */
+      align-self: center;
+    }
     .chat-input-right {
       display: flex;
       gap: 8px;
       align-items: center;
       flex-shrink: 0;
+      /* Vertically center the right group (mode toggle + send) in the bar
+         so the "Agent"/"Chat" text lines up with the input text
+         (the textarea is centered via .chat-input-center). Without this
+         the right group sat at flex-end (bottom), leaving the mode
+         text lower than the input placeholder. */
+      align-self: center;
     }
     .input-icon-btn {
       background: none;
@@ -2476,7 +2551,15 @@ body.bg-pattern-sparkles {
       color: var(--fg);
       opacity: 0.5;
       cursor: pointer;
-      padding: 6px;
+      /* Fixed square cover, identical to the model-picker button (32×32,
+         radius 8) so all input-bar controls share the same size and never
+         shrink/distort when the row is tight. */
+      width: 32px;
+      height: 32px;
+      min-width: 32px;
+      min-height: 32px;
+      flex-shrink: 0;
+      padding: 0;
       border-radius: 8px;
       display: flex;
       align-items: center;
@@ -2493,6 +2576,14 @@ body.bg-pattern-sparkles {
       opacity: 1;
       color: var(--fg);
       background: color-mix(in srgb, var(--fg) 9%, transparent);
+    }
+    /* Tool indicators carry a text label (Workspace / RAG / Research …), so
+       they must NOT be locked to the 32px square — let them grow to fit. */
+    .input-icon-btn.tool-indicator {
+      width: auto;
+      min-width: 32px;
+      padding: 0 8px;
+      gap: 2px;
     }
     /* GitHub-style task lists (- [ ] / - [x]) */
     li.task-item {
@@ -2710,6 +2801,17 @@ body.bg-pattern-sparkles {
       background: color-mix(in srgb, var(--send-btn-hover, var(--send-btn-bg, var(--red))) 85%, var(--panel, #2a2a2a));
       color: #fff;
     }
+    /* VAD about to auto-stop — amber warning pulse on the recording mic */
+    @keyframes silence-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, #f5a623 70%, transparent); }
+      50% { box-shadow: 0 0 0 6px color-mix(in srgb, #f5a623 0%, transparent); }
+    }
+    .send-btn.recording.silence-near {
+      background: color-mix(in srgb, #f5a623 55%, var(--panel, #2a2a2a));
+      color: #fff;
+      border-color: #f5a623;
+      animation: silence-pulse 0.8s ease-in-out infinite;
+    }
     /* Hover: just spin the + 90° (no size change). The "New chat" affordance
        is the tooltip (title="New chat") plus the icon rotation.
        Gated on data-mode="newchat" so the arrow variant (empty-session state
@@ -2808,6 +2910,13 @@ body.bg-pattern-sparkles {
       transition: color 0.2s;
       white-space: nowrap;
       height: 100%;
+      /* Vertically center the Agent/Chat label inside the toggle. Without
+         this the text sat at the top of the 28px button, reading low
+         next to the input placeholder (which centers its text) — making
+         the input look too high. */
+      display: flex;
+      align-items: center;
+      justify-content: center;
       position: relative;
       z-index: 1;
     }
@@ -2862,64 +2971,128 @@ body.bg-pattern-sparkles {
     .model-picker-wrap {
       position: relative;
       flex-shrink: 0;
+      flex-grow: 0;
+      /* Vertically center the model-select (logo + +) in the bar so its
+         icon spacing lines up with the Agent/Chat + Send cluster
+         on the right (the reference the input text is centered to). */
+      align-self: center;
     }
+    /* Icon-only model switcher: the (potentially long) model name is kept out
+       of the composer row — only a provider glyph + chevron show — so it no
+       longer competes with the textarea for horizontal space. The model name
+       itself lives in #model-picker-label (visually hidden, but retained for
+       screen readers and the legacy getCurrentModel()/preset readers) and in
+       the button's title/aria-label. */
     .model-picker-btn {
       display: inline-flex;
       align-items: center;
-      gap: 4px;
-      height: 21px;
-      padding: 0 6px;
-      font-size: 11px;
-      font-weight: 500;
+      justify-content: center;
+      gap: 0;
+      width: 32px;
+      height: 32px;
+      padding: 0;
       font-family: inherit;
-      background: none;
-      border: 1px solid transparent;
-      border-radius: 4px;
-      /* 65% mix lifts the model label above the WCAG AA 4.5:1 threshold
-         against the dark chat-bar (40% only reached ~2.9:1). */
-      color: color-mix(in srgb, var(--fg) 65%, transparent);
-      cursor: pointer;
-      white-space: nowrap;
-      transition: background 0.15s, color 0.15s, border-color 0.15s;
-    }
-    .model-picker-btn:hover {
-      border-color: var(--border);
-      background: color-mix(in srgb, var(--fg) 8%, transparent);
-      color: var(--fg);
-    }
+        /* Locked visual identity: theme ACCENT (--red) background + white glyph.
+           Never the user-customizable --send-btn-bg (can leak to white). The
+           background/color are forced across hover/focus/active so the button
+           NEVER flips to white — interaction feedback is done purely via a
+           contained brightness + press-scale animation below. */
+        background: var(--red);
+        color: #fff;
+       border: none;
+       border-radius: 8px;
+       cursor: pointer;
+       flex-shrink: 0;
+       overflow: hidden;
+       outline: none;
+       -webkit-tap-highlight-color: transparent;
+       transition: filter 0.15s ease, transform 0.12s ease;
+     }
+     /* Keep background + glyph color identical in every interaction state so
+        no theme/browser default can turn the chip white. */
+     .model-picker-btn:hover,
+     .model-picker-btn:focus,
+     .model-picker-btn:focus-visible,
+     .model-picker-btn:active {
+       background: var(--red);
+       color: #fff;
+     }
+     .model-picker-btn:hover {
+       filter: brightness(1.08);
+     }
+     /* Professional click feedback: a quick press-in, no color change. */
+     .model-picker-btn:active {
+       transform: scale(0.92);
+       filter: brightness(0.95);
+     }
     .model-picker-btn #model-picker-label {
-      max-width: 120px;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      display: none;
     }
-    .model-picker-btn svg {
+     .model-picker-logo {
+       display: inline-flex;
+       align-items: center;
+       justify-content: center;
+       flex-shrink: 0;
+       /* No overflow clipping and no vertical nudge: the sparkle must grow
+          symmetrically from the true center of the 32px chip, otherwise the
+          scale animation looks shifted down/left when clipped. */
+        overflow: visible;
+        width: 24px;
+        height: 24px;
+        line-height: 0;
+        /* Small optical-centering nudge downward — the sparkle glyph's visual
+           mass sits slightly high in its box, so a tiny push balances it. */
+        transform: translateY(2px);
+      }
+    .model-picker-logo svg,
+    .model-picker-logo img {
+      width: 16px;
+      height: 16px;
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      display: block;
       flex-shrink: 0;
-      opacity: 0.5;
+      min-width: 0;
+      opacity: 1;
+      border-radius: 3px;
     }
-    .model-picker-logo {
-      display: inline-flex;
-      align-items: center;
-      vertical-align: -2px;
-    }
-    .model-picker-logo svg {
-      width: 12px;
-      height: 12px;
-      opacity: 0.7;
-    }
+    /* Default model-picker icon (Sparkle) — shown for every model instead of
+       per-model brand glyphs. Centered on (12,12) so it sits dead-center in the
+       32px chip. Gentle twinkle so it reads as a living AI logo. */
+      .model-picker-logo svg {
+        width: 24px;
+        height: 24px;
+        display: block;
+        /* Animate around the exact center so the twinkle grows evenly in all
+           directions and stays visually centered in the chip. */
+        transform-box: view-box;
+        transform-origin: center center;
+       animation: model-picker-sparkle 2.6s ease-in-out infinite;
+     }
+     @keyframes model-picker-sparkle {
+       0%, 100% { transform: scale(.82) rotate(-10deg); opacity: .78; }
+       50%      { transform: scale(1.12) rotate(10deg);  opacity: 1; }
+     }
+     .model-picker-logo .model-sparkle {
+       transform-box: fill-box;
+       transform-origin: center;
+     }
     .model-picker-menu {
       position: absolute;
       bottom: calc(100% + 16px);
-      right: 0;
+      left: 0;
+      right: auto;
       z-index: 250;
       min-width: 260px;
-      max-width: 360px;
+      max-width: min(360px, calc(100vw - 16px));
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: 8px;
       box-shadow: 0 -4px 20px rgba(0,0,0,0.4);
       padding: 6px;
       animation: picker-roll-up 0.2s ease-out;
-      transform-origin: bottom right;
+      transform-origin: bottom left;
     }
     .model-picker-menu.closing {
       animation: picker-roll-down 0.15s ease-in forwards;
@@ -4331,6 +4504,9 @@ body.bg-pattern-sparkles {
         transition: opacity 0.35s ease;
       }
       #sidebar-backdrop.visible { opacity: 1; pointer-events: auto; }
+      /* Keep the show-sidebar icon above the mobile drawer so it stays a
+         single, always-visible open/close toggle (no corner jump). */
+      .hamburger-btn { z-index: 450; }
       /* Elastic overscroll on sidebar */
       .sidebar-inner {
         -webkit-overflow-scrolling: touch;
@@ -4468,11 +4644,39 @@ body.bg-pattern-sparkles {
         padding: 12px 10px;
         min-height: 48px;
       }
-      /* Input icon buttons — bigger touch targets */
+      /* Input icon buttons — bigger touch targets, fixed 44px square to match
+         the model-picker cover so all input-bar controls stay identical and
+         never shrink/distort on tablet & mobile. */
       .input-icon-btn {
-        padding: 10px;
+        width: 44px;
+        height: 44px;
         min-width: 44px;
         min-height: 44px;
+        padding: 0;
+        flex-shrink: 0;
+        aspect-ratio: 1 / 1;
+      }
+      /* On mobile the tool indicators show icon-only (label hidden below), so
+         they too become a clean 44px square like the rest. */
+      .input-icon-btn.tool-indicator {
+        width: 44px;
+        padding: 0;
+      }
+      /* Model picker — match the 44px tool-button size on mobile so the icon
+         lines up (sejajar) with the other input-bar icons. Keep it a fixed
+         square: width == height and flex-shrink:0 so it never gets squashed
+         (penyet) or distorted when the input row is tight. */
+      .model-picker-btn {
+        width: 44px;
+        height: 44px;
+        min-width: 44px;
+        min-height: 44px;
+        padding: 0;
+        flex-shrink: 0;
+        aspect-ratio: 1 / 1;
+      }
+      .model-picker-wrap {
+        flex-shrink: 0;
       }
       /* Tool indicators — icon only on mobile (hide text, keep x) */
       .tool-indicator > span {
@@ -6113,7 +6317,6 @@ body.bg-pattern-sparkles {
     body.tour-active .sidebar,
     body.tour-active .sidebar-inner,
     body.tour-active .chat-input-bar,
-    body.tour-active .chat-input-top,
     body.tour-active .chat-input-wrap,
     body.tour-active .chat-input-right,
     body.tour-active .mode-toggle,
@@ -6208,25 +6411,157 @@ body.bg-pattern-sparkles {
       pointer-events: none;
     }
 
-    /* Generated images inside chat bubbles */
-    .msg.generated-image-wrap .body { text-align: center; }
-    .generated-image {
+    /* ── Generated images inside chat bubbles ──
+       The photo alone, sized to its true aspect ratio, with a living-particle
+       loader shown until it paints. No text labels around the image. */
+    /* Strip the default AI-bubble chrome so the photo sits cleanly on the
+       chat background — just the photo + its slim toolbar, nothing else. */
+    .msg.generated-image-wrap {
+      background: none;
+      border: none;
+      box-shadow: none;
+      padding: 0;
+      border-radius: 0;
+      width: auto;
       max-width: 100%;
-      max-height: 512px;
-      border-radius: 8px;
-      cursor: pointer;
-      transition: transform 0.2s;
-      display: inline-block;
+      min-width: 0;
+    }
+    .msg.generated-image-wrap .body { text-align: center; }
+    .msg.generated-image-wrap .body > * { margin-top: 0; margin-bottom: 0; }
+
+    .gen-image-frame {
+      position: relative;
+      width: 100%;
+      max-width: 480px;
+      max-height: 72vh;
       margin: 0 auto;
+      border-radius: 12px;
+      overflow: hidden;
+      background:
+        linear-gradient(135deg,
+          color-mix(in srgb, var(--accent) 9%, var(--bg)),
+          color-mix(in srgb, var(--accent) 3%, var(--bg)));
+      box-shadow: 0 1px 2px rgba(0,0,0,.18), 0 8px 24px rgba(0,0,0,.22);
+      cursor: zoom-in;
     }
-    .generated-image:hover { transform: scale(1.02); }
-    .generated-image-caption {
-      font-size: 0.8rem;
-      opacity: 0.5;
-      margin-top: 6px;
+    .generated-image {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      opacity: 0;
+      transition: opacity .6s ease;
+    }
+    .gen-image-frame.loaded .generated-image { opacity: 1; }
+    .gen-image-frame.loaded { cursor: zoom-in; }
+
+    /* Loading overlay (living particles) — fades out once the photo loads. */
+    .gen-image-loading {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      overflow: hidden;
+      background:
+        radial-gradient(120% 120% at 50% 40%,
+          color-mix(in srgb, var(--accent) 10%, transparent),
+          color-mix(in srgb, var(--accent) 2%, transparent) 60%,
+          transparent 100%);
+      transition: opacity .6s ease;
+    }
+    .gen-image-frame.loaded .gen-image-loading { opacity: 0; pointer-events: none; }
+
+    .gen-image-core {
+      position: absolute;
+      top: 50%; left: 50%;
+      width: 54px; height: 54px;
+      border-radius: 50%;
+      background: radial-gradient(circle, color-mix(in srgb, var(--accent) 60%, transparent), transparent 70%);
+      filter: blur(3px);
+      transform: translate(-50%, -50%);
+      animation: gen-core-pulse 2.4s ease-in-out infinite;
+    }
+    @keyframes gen-core-pulse {
+      0%, 100% { transform: translate(-50%, -50%) scale(.75); opacity: .45; }
+      50%      { transform: translate(-50%, -50%) scale(1.25); opacity: .9; }
+    }
+
+    .gen-particle {
+      position: absolute;
+      border-radius: 50%;
+      background: color-mix(in srgb, var(--accent) 80%, #fff);
+      box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 70%, transparent);
+      opacity: .35;
+      animation-name: gen-particle-float;
+      animation-timing-function: ease-in-out;
+      animation-iteration-count: infinite;
+      will-change: transform, opacity;
+    }
+    @keyframes gen-particle-float {
+      0%   { transform: translate(0, 0);                                   opacity: .15; }
+      20%  { transform: translate(var(--dx1), var(--dy1));                opacity: .9;  }
+      40%  { transform: translate(var(--dx2), var(--dy2));                opacity: .4;  }
+      60%  { transform: translate(var(--dx3), var(--dy3));                opacity: .85; }
+      80%  { transform: translate(var(--dx4), var(--dy4));                opacity: .35; }
+      100% { transform: translate(0, 0);                                   opacity: .15; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .gen-particle, .gen-image-core { animation: none; }
+      .gen-image-core { opacity: .6; }
+    }
+
+    .gen-image-unavailable {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 160px;
+    }
+    .gen-image-unavailable-label {
+      color: var(--color-muted-alt);
+      font-size: .8rem;
       font-style: italic;
-      text-align: center;
     }
+
+    /* ── Slim, aligned icon toolbar below the image ── */
+    .gen-image-footer {
+      display: flex;
+      justify-content: center;
+      margin-top: 10px;
+    }
+    .gen-image-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      padding: 4px;
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--bg) 55%, transparent);
+      border: 1px solid var(--border);
+      box-shadow: 0 1px 2px rgba(0,0,0,.12);
+      backdrop-filter: blur(6px);
+    }
+    .gen-image-action {
+      width: 34px; height: 34px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: none;
+      background: none;
+      color: var(--fg);
+      opacity: .72;
+      border-radius: 9px;
+      cursor: pointer;
+      transition: background .15s ease, color .15s ease, opacity .15s ease, transform .15s ease;
+    }
+    .gen-image-action svg { width: 16px; height: 16px; display: block; }
+    .gen-image-action:hover {
+      opacity: 1;
+      background: color-mix(in srgb, var(--accent) 14%, transparent);
+      color: var(--accent);
+    }
+    .gen-image-action:active { transform: scale(.92); }
+    .gen-image-action.delete:hover {
+      color: var(--red);
+      background: color-mix(in srgb, var(--red) 14%, transparent);
+    }
+    .gen-image-action.done { color: var(--green, #3ec46d); opacity: 1; }
+    .gen-image-action.failed { color: var(--red); opacity: 1; }
 
     /* Setup wizard */
     .setup-wizard { padding: 16px; max-width: 500px; }
@@ -6438,24 +6773,27 @@ body.bg-pattern-sparkles {
 
 /* ── Voice, Search, Themes, Comparison, Censor, Print ── */
 
-    /* Voice recording styles */
-    #mic-btn {
-      color: var(--fg);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      transition: all 0.2s ease;
-    }
-    
-    #mic-btn:hover {
-      background: color-mix(in srgb, var(--fg) 6%, transparent);
-      border-color: var(--fg);
-    }
-    
-    #mic-btn.recording {
-      background: var(--color-recording);
-      border-color: var(--color-recording);
-      animation: pulse 1.5s infinite;
-    }
+     /* Voice recording styles */
+     /* Idle: borderless icon-only, identical to the other composer tool
+        buttons (web/shell/image). The base look comes from .input-icon-btn;
+        we only add record-specific ACTIVE feedback below. */
+     #mic-btn {
+       transition: opacity 0.15s, background 0.15s, color 0.15s;
+     }
+
+     #mic-btn.recording {
+       opacity: 1;
+       color: #fff;
+       background: var(--color-recording);
+       animation: pulse 1.5s infinite;
+     }
+
+     /* VAD about to auto-stop — amber warning pulse on the recording mic */
+     #mic-btn.recording.silence-near {
+       background: color-mix(in srgb, #f5a623 55%, var(--panel, #2a2a2a));
+       color: #fff;
+       animation: silence-pulse 0.8s ease-in-out infinite;
+     }
     
     @keyframes pulse {
       0% { opacity: 1; }
@@ -7217,11 +7555,12 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
     .cmp-prov-select {
       flex: 0 0 auto; width: 120px; font-size: 0.8em;
     }
-    /* Eval-prompts picker — only shown during compare; absolute top-right
-       inside .chat-input-top, matching .model-picker-wrap's slot. */
-    .chat-input-top > .cmp-eval-wrap {
+    /* Eval-prompts picker — only shown during compare; absolute far-left
+       inside .chat-input-bar, overlapping the model picker's slot. */
+    .chat-input-bar > .cmp-eval-wrap {
       position: absolute;
-      top: -2px; right: 0;
+      top: 50%; left: 12px;
+      transform: translateY(-50%);
       z-index: 2;
     }
     .cmp-eval-btn {
@@ -8533,7 +8872,11 @@ button.hamburger {
   resize: none;
   font-size: 13px !important;
   overflow-y: auto !important;
-  line-height: 1.4 !important;
+  /* Equal to min-height so the single-line text/placeholder is vertically
+     centered in the 34px box (textarea text pins to the top otherwise, which
+     left ~16px of dead space below and made "Aigenchain..." sit high vs. the
+     centered Agent/Chat label). */
+  line-height: 34px !important;
   font-family: inherit !important;
 }
 
@@ -18629,6 +18972,57 @@ body.gallery-selecting .gallery-dl-btn,
   display: inline-flex;
   max-width: 100%;
   max-height: 80vh;
+}
+/* When zoomed, clip the scaled image to the frame so panning stays contained. */
+.gallery-detail-img-frame.gallery-zoomed {
+  overflow: hidden;
+}
+.gallery-detail-img-frame img {
+  touch-action: none;
+}
+/* Zoom control bar — bottom-center of the image, hover-revealed like nav. */
+.gallery-detail-zoom {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 999px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 4;
+}
+.gallery-detail-image:hover .gallery-detail-zoom,
+.gallery-detail-img-frame.gallery-zoomed .gallery-detail-zoom {
+  opacity: 0.9;
+}
+.gallery-detail-zoom:hover { opacity: 1 !important; }
+.gallery-detail-zoom-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.9);
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 50%;
+  padding: 0;
+  transition: background 0.12s;
+}
+.gallery-detail-zoom-btn:hover { background: rgba(255, 255, 255, 0.18); }
+.gallery-detail-zoom-level {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  min-width: 40px;
+  text-align: center;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
 }
 .gallery-detail-image img,
 .gallery-detail-image video,
@@ -40447,4 +40841,139 @@ body.theme-frosted .modal {
 @media (max-width: 768px) {
   .compare-grid[data-cols] { grid-template-columns: 1fr !important; overflow-y: auto; }
   .compare-pane { min-height: 60dvh; }
+}
+
+/* ── Voice Call (callController.js) ── */
+/* The Call icon now lives inside the Send button (mode 'call'); style it there. */
+.send-btn.call-active {
+  opacity: 1;
+  color: var(--accent, #4f9cff);
+  background: color-mix(in srgb, var(--accent, #4f9cff) 14%, transparent);
+}
+.send-btn.call-active .call-bars-anim line {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: call-bars 1s ease-in-out infinite;
+}
+.send-btn.call-active .call-bars-anim line:nth-child(1) { animation-delay: 0s; }
+.send-btn.call-active .call-bars-anim line:nth-child(2) { animation-delay: .15s; }
+.send-btn.call-active .call-bars-anim line:nth-child(3) { animation-delay: .3s; }
+.send-btn.call-active .call-bars-anim line:nth-child(4) { animation-delay: .15s; }
+.send-btn.call-active .call-bars-anim line:nth-child(5) { animation-delay: 0s; }
+/* Separate "Record voice" button — inherits .input-icon-btn; size its SVG. */
+.mic-btn svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+  flex-shrink: 0;
+}
+@keyframes call-bars {
+  0%, 100% { transform: scaleY(.55); }
+  50%      { transform: scaleY(1); }
+}
+
+.call-overlay {
+  position: fixed;
+  left: 50%;
+  bottom: 92px;
+  transform: translateX(-50%);
+  width: min(520px, 92vw);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--bg) 92%, #000 8%);
+  border: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+  z-index: 1200;
+  overflow: hidden;
+}
+.call-overlay.hidden { display: none; }
+
+.call-overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+.call-overlay-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+.call-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--accent, #4f9cff);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent, #4f9cff) 60%, transparent);
+  animation: call-pulse 1.6s ease-in-out infinite;
+}
+@keyframes call-pulse {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent, #4f9cff) 55%, transparent); }
+  70%  { box-shadow: 0 0 0 8px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.call-timer {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  opacity: .7;
+  margin-left: 2px;
+}
+.call-end-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--red, #ff5f56);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter .15s;
+}
+.call-end-btn:hover { filter: brightness(1.08); }
+
+.call-transcript {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 42vh;
+}
+.call-line {
+  display: flex;
+  gap: 8px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  animation: call-fade .18s ease-out;
+}
+@keyframes call-fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.call-who {
+  flex: 0 0 auto;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  opacity: .55;
+  padding-top: 2px;
+  width: 30px;
+}
+.call-user .call-who { color: var(--accent, #4f9cff); opacity: .9; }
+.call-ai .call-who { color: var(--fg); }
+.call-text { flex: 1 1 auto; white-space: pre-wrap; word-wrap: break-word; }
+
+.call-status {
+  padding: 8px 14px;
+  border-top: 1px solid color-mix(in srgb, var(--fg) 12%, transparent);
+  font-size: 12px;
+  opacity: .7;
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
 }

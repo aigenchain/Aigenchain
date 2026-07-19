@@ -18,6 +18,24 @@ const RECENT_MAX = 5;
 // Catalogs at or below this size are small enough that hiding everything
 // behind search would be a regression — keep listing them in browse mode.
 const BROWSE_ALL_LIMIT = 12;
+// Neutral glyph shown in the icon-only picker when no model is selected yet.
+const DEFAULT_MODEL_ICON =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+  + '<polygon points="12 2 2 7 12 12 22 7 12 2"/>'
+  + '<polyline points="2 17 12 22 22 17"/>'
+  + '<polyline points="2 12 12 17 22 12"/>'
+  + '</svg>';
+// Single consistent static default for the model picker (Sparkle). Shown
+// for every model instead of per-model brand glyphs, which are inconsistent
+// and can vanish on tinted/accent wrappers. This is exactly the "A · Sparkle"
+// path chosen in model-icon-preview.html, re-centered on (12,12) so it sits
+// dead-center in the 32px chip. No animation — it reads as a clean still logo
+// (like the Send button) rather than a blinking/twinkling glyph. Mirrors the
+// Voice-Call icon language.
+const MODEL_PICKER_SPARKLE =
+  '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">'
+  + '<path class="model-sparkle" d="M12 2c.5 5.4 2.6 7.5 8 8-5.4.5-7.5 2.6-8 8-.5-5.4-2.6-7.5-8-8 5.4-.5 7.5-2.6 8-8z"/>'
+  + '</svg>';
 
 function _loadList(key) {
   try {
@@ -300,6 +318,7 @@ function _initModelPickerDropdown() {
     'anthracite-org': 'Anthracite', 'anthropic': 'Anthropic', 'arcee-ai': 'Arcee AI',
     'baai': 'BAAI', 'baidu': 'Baidu', 'bigcode': 'BigCode',
     'black-forest-labs': 'Black Forest Labs', 'bytedance': 'ByteDance',
+    '@cf': 'Cloudflare',
     'bytedance-seed': 'ByteDance', 'cognitivecomputations': 'Cognitive Computations',
     'cohere': 'Cohere', 'databricks': 'Databricks', 'deepcogito': 'DeepCogito',
     'deepseek': 'DeepSeek', 'deepseek-ai': 'DeepSeek', 'essentialai': 'Essential AI',
@@ -571,13 +590,16 @@ function _initModelPickerDropdown() {
     if (!currentSessionId && _pendingChat) {
       // Already have a deferred session — just update the model
       _deps.setPendingChat({ url: m.url, modelId: m.mid, endpointId: m.endpointId, source: 'manual' });
-      // Header stays as session name — model switch only updates picker
+      // Reflect the pending model in the header (New Chat · model)
+      if (_deps.refreshSessionHeader) _deps.refreshSessionHeader();
       updateModelPicker();
       uiModule.showToast(`Using ${m.display}`);
       return;
     } else if (!currentSessionId) {
-      // No session yet — create one with this model
-      await _deps.createDirectChat(m.url, m.mid, m.endpointId);
+      // No session yet — create one with this model. Mark it 'manual' so a
+      // subsequent updateModelPicker()/_ensureDefaultPendingChat() does NOT
+      // reset the user's explicit pick back to the server default model.
+      await _deps.createDirectChat(m.url, m.mid, m.endpointId, 'manual');
     } else {
       // Existing session with no model — PATCH it
       const fd = new FormData();
@@ -593,7 +615,9 @@ function _initModelPickerDropdown() {
         const sessions = _deps.getSessions();
         const s = sessions.find(x => x.id === currentSessionId);
         if (s) { s.model = m.mid; s.endpoint_url = m.url; }
-        // Header stays as session name — model info shown in picker only
+        // Refresh the conversation header so it reflects the new model
+        // immediately (was previously left showing the old model).
+        if (_deps.refreshSessionHeader) _deps.refreshSessionHeader();
       } catch (e) {
         uiModule.showError('Failed to set model: ' + e);
         return;
@@ -785,13 +809,23 @@ export function updateModelPicker() {
   }
 
   const displayName = modelId ? modelId.split('/').pop() : 'Select model';
-  // The header indicator clips long names with ellipsis; show the full model
-  // identifier on hover (#1982). No tooltip on the "Select model" placeholder.
-  label.title = modelId || '';
-  const logo = modelId ? providerLogo(modelId) : null;
-  if (logo) {
-    label.innerHTML = '<span class="model-picker-logo">' + logo + '</span> ' + displayName;
-  } else {
-    label.textContent = displayName;
+  const btn = document.getElementById('model-picker-btn');
+  const logoSpan = document.getElementById('model-picker-logo');
+  // Icon-only button: show the provider glyph (or a neutral model glyph when
+  // none is selected) in the visible #model-picker-logo span. The full model
+  // name is kept in the (visually hidden) #model-picker-label so screen
+  // readers and the legacy getCurrentModel()/preset readers still work, and
+  // it's surfaced on hover via the button title + aria-label.
+  if (logoSpan && !logoSpan.querySelector('.model-sparkle')) {
+    // Always show one consistent animated default (Sparkle) regardless of
+    // which model is selected — not the per-model brand glyph. Only inject
+    // when missing so repeated updates don't restart the animation or cause
+    // a flicker on click.
+    logoSpan.innerHTML = MODEL_PICKER_SPARKLE;
   }
+  if (btn) {
+    btn.title = modelId ? displayName : 'Select model';
+    btn.setAttribute('aria-label', modelId ? ('Model: ' + displayName) : 'Select model');
+  }
+  if (label) label.textContent = displayName;
 }

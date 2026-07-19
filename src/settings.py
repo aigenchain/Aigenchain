@@ -56,6 +56,14 @@ DEFAULT_SETTINGS = {
     "stt_provider": "disabled",
     "stt_model": "base",
     "stt_language": "",
+    # Voice Call (Star Voice Call): which browser SpeechSynthesis voice + speed
+    # the AI speaks with during a live voice call. Kept separate from
+    # tts_voice/tts_speed (which drive read-aloud) so the call can use a
+    # different speaker. ``call_voice`` is the voice *name*; "" means the OS
+    # default voice.
+    "call_enabled": True,
+    "call_voice": "",
+    "call_speed": "1",
     "search_provider": "searxng",
     # Default fallback chain — when the primary provider fails or
     # rate-limits, we try DuckDuckGo next. Free, no API key required, so

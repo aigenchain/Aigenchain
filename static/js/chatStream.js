@@ -23,11 +23,7 @@ export function handleUIControl(uiData) {
         web: 'web-toggle', bash: 'bash-toggle', rag: 'rag-toggle',
         research: 'research-toggle', incognito: 'incognito-toggle',
       };
-      var btnMap = {
-        web: 'web-toggle-btn', bash: 'bash-toggle-btn', rag: 'rag-indicator-btn',
-      };
       var chkId = toggleMap[uiData.toggle_name];
-      var btnId = btnMap[uiData.toggle_name];
       if (uiData.toggle_name === 'rag' && window._syncRagIndicator) {
         window._syncRagIndicator(!!uiData.state);
       } else {
@@ -35,10 +31,15 @@ export function handleUIControl(uiData) {
           var chk = document.getElementById(chkId);
           if (chk) chk.checked = !!uiData.state;
         }
-        if (btnId) {
-          var btn = document.getElementById(btnId);
-          if (btn) btn.classList.toggle('active', !!uiData.state);
-        }
+        // Keep every button bound to this tool (standalone + overflow menu) in sync
+        var _btnIds = {
+          web: ['web-toggle-btn', 'overflow-web-btn'],
+          bash: ['bash-toggle-btn', 'overflow-shell-btn'],
+        }[uiData.toggle_name];
+        if (_btnIds) _btnIds.forEach(function(id) {
+          var b = document.getElementById(id);
+          if (b) b.classList.toggle('active', !!uiData.state);
+        });
       }
       var ts = Storage.getJSON(Storage.KEYS.TOGGLES, {});
       ts[uiData.toggle_name] = !!uiData.state;
@@ -52,6 +53,11 @@ export function handleUIControl(uiData) {
         agentBtn.classList.toggle('active', modeVal === 'agent');
         chatBtn.classList.toggle('active', modeVal !== 'agent');
       }
+      // Keep the mobile-only overflow mode items (+ menu) in sync too
+      var overflowAgent = document.getElementById('overflow-agent-btn');
+      var overflowChat = document.getElementById('overflow-chat-btn');
+      if (overflowAgent) { overflowAgent.classList.toggle('active', modeVal === 'agent'); overflowAgent.setAttribute('aria-pressed', String(modeVal === 'agent')); }
+      if (overflowChat) { overflowChat.classList.toggle('active', modeVal !== 'agent'); overflowChat.setAttribute('aria-pressed', String(modeVal !== 'agent')); }
       var ts2 = Storage.getJSON(Storage.KEYS.TOGGLES, {});
       ts2.mode = modeVal;
       Storage.setJSON(Storage.KEYS.TOGGLES, ts2);

@@ -1248,53 +1248,126 @@ document.addEventListener('click', function(e) {
 }, true);
 
 /**
+ * Build the "living particle" loading overlay shown over the image frame while
+ * the photo is still being fetched/painted. Particles wander organically
+ * (randomised start positions, drift waypoints and timing) so the placeholder
+ * feels alive rather than a static spinner.
+ */
+function _buildImageParticles() {
+  const overlay = document.createElement('div');
+  overlay.className = 'gen-image-loading';
+  const core = document.createElement('div');
+  core.className = 'gen-image-core';
+  overlay.appendChild(core);
+  const rnd = (min, max) => (Math.random() * (max - min) + min);
+  const N = 22;
+  for (let i = 0; i < N; i++) {
+    const p = document.createElement('span');
+    p.className = 'gen-particle';
+    const s = (2 + Math.random() * 3).toFixed(1); // 2\u20135px
+    p.style.width = s + 'px';
+    p.style.height = s + 'px';
+    p.style.left = (5 + Math.random() * 90).toFixed(1) + '%';
+    p.style.top = (5 + Math.random() * 90).toFixed(1) + '%';
+    p.style.animationDuration = rnd(4, 9).toFixed(2) + 's';
+    p.style.animationDelay = (-rnd(0, 6)).toFixed(2) + 's';
+    for (let k = 1; k <= 4; k++) {
+      p.style.setProperty('--dx' + k, rnd(-130, 130).toFixed(0) + 'px');
+      p.style.setProperty('--dy' + k, rnd(-130, 130).toFixed(0) + 'px');
+    }
+    overlay.appendChild(p);
+  }
+  return overlay;
+}
+
+/**
+ * Derive a CSS aspect-ratio (e.g. "1 / 1", "1024 / 1536") from the size hint
+ * the backend returns ("1024x1024", "1024x1536", "9:16", \u2026). Falls back to a
+ * square frame when the size is unknown/auto.
+ */
+function _aspectFromSize(size) {
+  if (!size) return '1 / 1';
+  const m = String(size).split(/[x:]/);
+  const w = parseFloat(m[0]), h = parseFloat(m[1]);
+  if (w > 0 && h > 0) return w + ' / ' + h;
+  return '1 / 1';
+}
+
+/**
  * Build a generated-image bubble element.
+ *
+ * Layout: a single photo, sized to its true aspect ratio (1:1, 9:16, 16:9, \u2026),
+ * with a living-particle loader shown until the image paints. No text labels \u2014
+ * the model/prompt/size metadata lives only in the composer / gallery, not on
+ * the chat photo. A slim, aligned icon toolbar (copy \u00B7 download \u00B7 edit \u00B7 open-in-
+ * gallery \u00B7 delete) sits just below the image.
  */
 export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId) {
-  var esc = uiModule.esc;
   const wrap = document.createElement('div');
   wrap.className = 'msg msg-ai generated-image-wrap';
-
-  const role = document.createElement('div');
-  role.className = 'role';
-  role.textContent = (model || 'image').split('/').pop();
-  wrap.appendChild(role);
 
   const body = document.createElement('div');
   body.className = 'body';
 
   const safeImageUrl = safeDisplayImageSrc(imageUrl);
   if (!safeImageUrl) {
-    body.textContent = '[Image unavailable]';
+    const frame = document.createElement('div');
+    frame.className = 'gen-image-frame gen-image-unavailable';
+    frame.style.aspectRatio = _aspectFromSize(size);
+    const lbl = document.createElement('div');
+    lbl.className = 'gen-image-unavailable-label';
+    lbl.textContent = 'Image unavailable';
+    frame.appendChild(lbl);
+    body.appendChild(frame);
     wrap.appendChild(body);
     return wrap;
   }
+
+  // Frame holds the photo + loader and sizes itself to the image aspect ratio.
+  const frame = document.createElement('div');
+  frame.className = 'gen-image-frame';
+  frame.style.aspectRatio = _aspectFromSize(size);
+
+  const overlay = _buildImageParticles();
+  frame.appendChild(overlay);
 
   const img = document.createElement('img');
   img.className = 'generated-image';
   img.alt = prompt || 'Generated image';
   img.title = prompt || 'Generated image';
-  img.src = safeImageUrl;
   img.addEventListener('click', () => { window.open(safeImageUrl, '_blank', 'noopener,noreferrer'); });
-  body.appendChild(img);
+  const _reveal = () => {
+    if (frame.classList.contains('loaded')) return;
+    // Snap the frame to the photo's true aspect ratio so cover-fit never crops.
+    if (img.naturalWidth && img.naturalHeight) {
+      frame.style.aspectRatio = img.naturalWidth + ' / ' + img.naturalHeight;
+    }
+    frame.classList.add('loaded');
+    // Let the fade-out finish, then drop the overlay node entirely.
+    setTimeout(() => { overlay.remove(); }, 650);
+  };
+  img.addEventListener('load', _reveal);
+  img.addEventListener('error', () => {
+    frame.classList.add('loaded', 'gen-image-error');
+    setTimeout(() => { overlay.remove(); }, 650);
+  });
+  img.src = safeImageUrl;
+  // Cached images may already be complete before listeners attach.
+  if (img.complete && img.naturalWidth) _reveal();
+  frame.appendChild(img);
 
-  if (prompt) {
-    const caption = document.createElement('div');
-    caption.className = 'generated-image-caption';
-    caption.textContent = prompt;
-    body.appendChild(caption);
-  }
-
+  body.appendChild(frame);
   wrap.appendChild(body);
 
+  // \u2500\u2500 Slim, aligned icon toolbar \u2500\u2500
   const footer = document.createElement('div');
-  footer.className = 'msg-footer';
+  footer.className = 'gen-image-footer';
 
-  const actions = document.createElement('span');
-  actions.className = 'msg-actions';
+  const actions = document.createElement('div');
+  actions.className = 'gen-image-actions';
 
   const copyBtn = document.createElement('button');
-  copyBtn.className = 'footer-copy-btn';
+  copyBtn.className = 'gen-image-action';
   copyBtn.type = 'button';
   copyBtn.title = 'Copy prompt';
   copyBtn.innerHTML = COPY_ICON;
@@ -1307,10 +1380,10 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
   actions.appendChild(copyBtn);
 
   const dlBtn = document.createElement('button');
-  dlBtn.className = 'footer-copy-btn';
+  dlBtn.className = 'gen-image-action';
   dlBtn.type = 'button';
   dlBtn.title = 'Download image';
-  dlBtn.textContent = '\u2913';
+  dlBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
   dlBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
     try {
@@ -1323,17 +1396,17 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
       a.click();
       a.remove();
       URL.revokeObjectURL(a.href);
-      dlBtn.textContent = '\u2713';
-      setTimeout(() => { dlBtn.textContent = '\u2913'; }, 1500);
-    } catch { dlBtn.textContent = '\u2717'; setTimeout(() => { dlBtn.textContent = '\u2913'; }, 1500); }
+      dlBtn.classList.add('done');
+      setTimeout(() => { dlBtn.classList.remove('done'); }, 1500);
+    } catch { dlBtn.classList.add('failed'); setTimeout(() => { dlBtn.classList.remove('failed'); }, 1500); }
   });
   actions.appendChild(dlBtn);
 
   const editBtn = document.createElement('button');
-  editBtn.className = 'footer-copy-btn';
+  editBtn.className = 'gen-image-action';
   editBtn.type = 'button';
   editBtn.title = 'Edit in image editor';
-  editBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
+  editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
   editBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
     try {
@@ -1365,10 +1438,10 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
 
   if (imageId) {
     const galleryBtn = document.createElement('button');
-    galleryBtn.className = 'footer-copy-btn footer-open-gallery-btn';
+    galleryBtn.className = 'gen-image-action';
     galleryBtn.type = 'button';
     galleryBtn.title = 'Open in gallery';
-    galleryBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg><span>Open in gallery</span>';
+    galleryBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>';
     galleryBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       try {
@@ -1383,10 +1456,10 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
   }
 
   const delBtn = document.createElement('button');
-  delBtn.className = 'footer-copy-btn footer-delete-btn';
+  delBtn.className = 'gen-image-action delete';
   delBtn.type = 'button';
   delBtn.title = 'Delete image';
-  delBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>';
+  delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>';
   delBtn.addEventListener('click', async (e) => {
     e.stopPropagation();
     const ok = await uiModule.styledConfirm('Delete this image?', {
@@ -1417,20 +1490,228 @@ export function buildImageBubble(imageUrl, prompt, model, size, quality, imageId
   actions.appendChild(delBtn);
 
   footer.appendChild(actions);
-
-  const metrics = document.createElement('span');
-  metrics.className = 'response-metrics';
-  const parts = [];
-  if (model) parts.push(model.split('/').pop());
-  if (size) parts.push(size);
-  if (quality) parts.push(quality);
-  const cost = getImageCost(model, quality, size);
-  if (cost !== null) parts.push('$' + (cost < 0.01 ? cost.toFixed(4) : cost.toFixed(3)));
-  metrics.textContent = parts.join(' \u00B7 ');
-  footer.appendChild(metrics);
-
   wrap.appendChild(footer);
   return wrap;
+}
+
+// ── Shared builders so a loader placeholder can be shown at generation start ──
+function _genImageFrame(size) {
+  const frame = document.createElement('div');
+  frame.className = 'gen-image-frame';
+  frame.style.aspectRatio = _aspectFromSize(size);
+  frame.appendChild(_buildImageParticles());
+  return frame;
+}
+
+function _genImageImg(prompt) {
+  const img = document.createElement('img');
+  img.className = 'generated-image';
+  img.alt = prompt || 'Generated image';
+  img.title = prompt || 'Generated image';
+  img.addEventListener('click', () => {
+    const u = img.getAttribute('data-full');
+    if (u) window.open(u, '_blank', 'noopener,noreferrer');
+  });
+  return img;
+}
+
+// Wire load/error handlers that fade the photo in over the particle overlay.
+// Returns a manual `reveal()` for already-cached images.
+function _genImageWire(img, frame) {
+  const overlay = frame.querySelector('.gen-image-loading');
+  const reveal = () => {
+    if (frame.classList.contains('loaded')) return;
+    // Snap the frame to the photo's true aspect ratio so cover-fit never crops.
+    if (img.naturalWidth && img.naturalHeight) {
+      frame.style.aspectRatio = img.naturalWidth + ' / ' + img.naturalHeight;
+    }
+    frame.classList.add('loaded');
+    setTimeout(() => { overlay && overlay.remove(); }, 650);
+  };
+  img.addEventListener('load', reveal);
+  img.addEventListener('error', () => {
+    frame.classList.add('loaded', 'gen-image-error');
+    setTimeout(() => { overlay && overlay.remove(); }, 650);
+  });
+  return reveal;
+}
+
+// Slim, aligned icon toolbar (copy · download · edit · open-in-gallery · delete).
+function _genImageToolbar(prompt, imageUrl, imageId, wrap) {
+  const footer = document.createElement('div');
+  footer.className = 'gen-image-footer';
+  const actions = document.createElement('div');
+  actions.className = 'gen-image-actions';
+
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'gen-image-action';
+  copyBtn.type = 'button';
+  copyBtn.title = 'Copy prompt';
+  copyBtn.innerHTML = COPY_ICON;
+  copyBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    uiModule.copyToClipboard(prompt || '');
+    copyBtn.innerHTML = CHECK_ICON;
+    setTimeout(() => { copyBtn.innerHTML = COPY_ICON; }, 1500);
+  });
+  actions.appendChild(copyBtn);
+
+  const dlBtn = document.createElement('button');
+  dlBtn.className = 'gen-image-action';
+  dlBtn.type = 'button';
+  dlBtn.title = 'Download image';
+  dlBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+  dlBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    try {
+      const resp = await fetch(imageUrl);
+      const blob = await resp.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = (prompt || 'image').slice(0, 40).replace(/[^a-zA-Z0-9 ]/g, '') + '.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+      dlBtn.classList.add('done');
+      setTimeout(() => { dlBtn.classList.remove('done'); }, 1500);
+    } catch { dlBtn.classList.add('failed'); setTimeout(() => { dlBtn.classList.remove('failed'); }, 1500); }
+  });
+  actions.appendChild(dlBtn);
+
+  const editBtn = document.createElement('button');
+  editBtn.className = 'gen-image-action';
+  editBtn.type = 'button';
+  editBtn.title = 'Edit in image editor';
+  editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
+  editBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    try {
+      const [galleryMod, editorMod] = await Promise.all([
+        import('./gallery.js'),
+        import('./galleryEditor.js'),
+      ]);
+      galleryMod.default.openGallery();
+      const modal = document.getElementById('gallery-modal');
+      if (modal) {
+        modal.querySelectorAll('.gallery-tab').forEach(t => t.classList.remove('active'));
+        modal.querySelector('.gallery-tab[data-tab="editor"]')?.classList.add('active');
+      }
+      const imagesContainer = document.getElementById('gallery-images-container');
+      const albumsContainer = document.getElementById('gallery-albums-container');
+      if (imagesContainer) imagesContainer.style.display = 'none';
+      if (albumsContainer) albumsContainer.style.display = 'none';
+      const editorContainer = document.getElementById('gallery-editor-container');
+      if (editorContainer) editorContainer.style.display = 'flex';
+      const label = (prompt || '').trim().slice(0, 60) || 'Generated image';
+      editorMod.openEditor(imageUrl, null, null, label);
+    } catch (err) {
+      console.error('[chat] open in editor failed', err);
+    }
+  });
+  actions.appendChild(editBtn);
+
+  if (imageId) {
+    const galleryBtn = document.createElement('button');
+    galleryBtn.className = 'gen-image-action';
+    galleryBtn.type = 'button';
+    galleryBtn.title = 'Open in gallery';
+    galleryBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>';
+    galleryBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        const mod = await import('./gallery.js');
+        const open = mod.openGalleryImage || (mod.default && mod.default.openGalleryImage);
+        if (open) open(imageId);
+      } catch (err) {
+        console.error('[chat] open in gallery failed', err);
+      }
+    });
+    actions.appendChild(galleryBtn);
+  }
+
+  const delBtn = document.createElement('button');
+  delBtn.className = 'gen-image-action delete';
+  delBtn.type = 'button';
+  delBtn.title = 'Delete image';
+  delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>';
+  delBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const ok = await uiModule.styledConfirm('Delete this image?', {
+      confirmText: 'Delete',
+      cancelText: 'Cancel',
+      danger: true,
+    });
+    if (!ok) return;
+    if (imageId) {
+      try {
+        const res = await fetch(`/api/gallery/${encodeURIComponent(imageId)}`, {
+          method: 'DELETE', credentials: 'same-origin',
+        });
+        if (!res.ok && res.status !== 404) {
+          uiModule.showToast?.('Delete failed', 4000);
+          return;
+        }
+        window.dispatchEvent(new CustomEvent('gallery-refresh'));
+      } catch (_) {
+        uiModule.showToast?.('Delete failed', 4000);
+        return;
+      }
+    }
+    (wrap || delBtn.closest('.generated-image-wrap'))?.remove();
+  });
+  actions.appendChild(delBtn);
+
+  footer.appendChild(actions);
+  return footer;
+}
+
+/**
+ * Placeholder shown the instant image generation starts (before the URL
+ * exists). Holds the living-particle loader at the correct aspect ratio; the
+ * real photo is swapped in via fillImagePlaceholder() once image_url arrives.
+ */
+export function createImagePlaceholder(size) {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg msg-ai generated-image-wrap';
+  const body = document.createElement('div');
+  body.className = 'body';
+  const frame = _genImageFrame(size);
+  const img = _genImageImg('');
+  _genImageWire(img, frame);
+  frame.appendChild(img);
+  body.appendChild(frame);
+  wrap.appendChild(body);
+  return wrap;
+}
+
+/**
+ * Swap a created placeholder (createImagePlaceholder) to its finished state:
+ * set the real photo URL (fades in over the loader) and attach the toolbar.
+ */
+export function fillImagePlaceholder(wrap, imageUrl, prompt, model, size, quality, imageId) {
+  if (!wrap) return;
+  const frame = wrap.querySelector('.gen-image-frame');
+  const img = wrap.querySelector('.generated-image');
+  if (!frame || !img) return;
+  const safeImageUrl = safeDisplayImageSrc(imageUrl);
+  if (safeImageUrl) {
+    img.alt = prompt || 'Generated image';
+    img.title = prompt || 'Generated image';
+    img.setAttribute('data-full', safeImageUrl);
+    img.src = safeImageUrl;
+    if (img.complete && img.naturalWidth) img.dispatchEvent(new Event('load'));
+  } else {
+    frame.classList.add('loaded', 'gen-image-error');
+    const lbl = document.createElement('div');
+    lbl.className = 'gen-image-unavailable-label';
+    lbl.textContent = 'Image unavailable';
+    frame.appendChild(lbl);
+  }
+  if (!wrap.querySelector('.gen-image-footer')) {
+    wrap.appendChild(_genImageToolbar(prompt, imageUrl, imageId, wrap));
+  }
+  uiModule.scrollHistory();
 }
 
 export function hideWelcomeScreen() {
@@ -1493,6 +1774,92 @@ function _trackAction(id) {
   recent.unshift(id);
   if (recent.length > 10) recent.length = 10;
   localStorage.setItem(_ACTION_RECENTS_KEY, JSON.stringify(recent));
+}
+
+/**
+ * "Listen" button — reads the AI reply aloud via the browser Speech Synthesis
+ * API (Web Speech API). Independent of the server TTS manager, so it works
+ * even when read-aloud is off. Crucially, it reads ONLY the reply prose: the
+ * "thinking process" block (.thinking-section), tool outputs, and source
+ * lists are stripped so the voice never reads irrelevant reasoning. Reuses
+ * the browser voice + speed chosen in Settings → AI → Voice Call when set.
+ */
+const LISTEN_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>';
+const LISTEN_STOP_ICON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>';
+
+function _cleanForSpeech(text) {
+  // Strip markdown/markup noise so the spoken text reads naturally.
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')        // fenced code blocks
+    .replace(/`([^`]+)`/g, '$1')            // inline code
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')     // headers
+    .replace(/\*\*([^*]+)\*\*/g, '$1')      // bold
+    .replace(/\*([^*]+)\*/g, '$1')          // italic
+    .replace(/__([^_]+)__/g, '$1')          // bold alt
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // links → label
+    .replace(/^>\s?/gm, '')                 // blockquotes
+    .replace(/[*_~`>#]/g, ' ')              // leftover markers
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function _extractListenText(msgElement) {
+  // Prefer the prose body; fall back to the whole message minus the footer.
+  const src = msgElement.querySelector('.body') || msgElement;
+  const clone = src.cloneNode(true);
+  // Drop non-prose / irrelevant blocks before reading.
+  clone.querySelectorAll('.thinking-section, .rag-sources, .agent-tool-output, .msg-footer, .memory-used-pill, .memory-used-detail')
+    .forEach(n => n.remove());
+  const raw = clone.textContent || clone.innerText || '';
+  return _cleanForSpeech(raw);
+}
+
+function addListenButton(msgElement, actions) {
+  if (!('speechSynthesis' in window)) return;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'ai-tts-button msg-listen-btn';
+  btn.title = 'Listen to reply';
+  btn.setAttribute('aria-label', 'Listen to reply');
+  btn.innerHTML = LISTEN_ICON;
+  btn.style.cssText = 'background:none;border:none;color:#6b7280;cursor:pointer;padding:2px 6px;border-radius:4px;transition:color .15s;line-height:1;display:inline-flex;align-items:center;';
+
+  let playing = false;
+  function reset() {
+    playing = false;
+    btn.innerHTML = LISTEN_ICON;
+    btn.classList.remove('playing');
+    btn.style.color = '#6b7280';
+    btn.title = 'Listen to reply';
+  }
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (playing) { window.speechSynthesis.cancel(); reset(); return; }
+    const text = _extractListenText(msgElement);
+    if (!text) return;
+    const utt = new SpeechSynthesisUtterance(text);
+    // Use the browser voice + speed from Settings → AI → Voice Call, if set.
+    if (typeof window._callVoice === 'string' && window._callVoice) {
+      const voices = window.speechSynthesis.getVoices();
+      const target = window._callVoice.toLowerCase();
+      const match = voices.find(v => v.name.toLowerCase() === target) ||
+                    voices.find(v => v.name.toLowerCase().includes(target));
+      if (match) utt.voice = match;
+    }
+    utt.rate = (typeof window._callSpeed === 'string' && parseFloat(window._callSpeed)) || 1;
+    playing = true;
+    btn.innerHTML = LISTEN_STOP_ICON;
+    btn.classList.add('playing');
+    btn.style.color = '#ccc';
+    btn.title = 'Stop';
+    utt.onend = reset;
+    utt.onerror = reset;
+    window.speechSynthesis.cancel(); // stop any other playback
+    window.speechSynthesis.speak(utt);
+  });
+
+  actions.appendChild(btn);
 }
 
 /**
@@ -1692,6 +2059,9 @@ export function createMsgFooter(msgElement) {
   }
 
   footer.appendChild(actions);
+  // Browser-TTS "Listen" button — always available (Web Speech API), reads
+  // the reply minus the thinking process. Placed in the action bar (below text).
+  addListenButton(msgElement, actions);
   return footer;
 }
 
@@ -1999,7 +2369,7 @@ export function displayMetrics(messageElement, metrics) {
           compactMsg.className = 'msg msg-ai';
           const compactRole = document.createElement('div');
           compactRole.className = 'role';
-          compactRole.textContent = 'Odysseus';
+          compactRole.textContent = 'Aigenchain';
           const compactBody = document.createElement('div');
           compactBody.className = 'body';
           compactBody.innerHTML = 'Compacting context <span class="compact-wave">▁▂▃▅▂▁</span>';
@@ -2445,7 +2815,7 @@ export function addMessage(role, content, modelName, metadata) {
     const isCompacted = metadata?.compacted;
     const replyModels = replyModelPair(modelName, metadata);
     const resolvedModel = replyModels.actualModel || replyModels.requestedModel;
-    var _roleText = role === 'user' ? 'You' : (isSlash || isCompacted) ? 'Odysseus' : modelRouteLabel(replyModels.requestedModel, resolvedModel);
+    var _roleText = role === 'user' ? 'You' : (isSlash || isCompacted) ? 'Aigenchain' : modelRouteLabel(replyModels.requestedModel, resolvedModel);
     if (role === 'assistant' && (metadata?.research || metadata?.research_clarification)) {
       _roleText += ' (Research)';
     }
@@ -2752,6 +3122,8 @@ const chatRenderer = {
   buildFindingsBox,
   appendReportButton,
   buildImageBubble,
+  createImagePlaceholder,
+  fillImagePlaceholder,
   hideWelcomeScreen,
   showWelcomeScreen,
   createMsgFooter,

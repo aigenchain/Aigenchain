@@ -362,6 +362,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       try { requestAnimationFrame(() => _wireArrowUpRecall(document.getElementById('message'))); } catch (_) {}
       setTimeout(() => _wireArrowUpRecall(document.getElementById('message')), 250);
     }
+
   }
 
   // addMessage, createMsgFooter, displayMetrics, hideWelcomeScreen, showWelcomeScreen
@@ -587,6 +588,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
     // Get current session
     const sessionId = sessionModule.getCurrentSessionId();
     const session = sessionModule.getSessions().find(s => s.id === sessionId);
+
     
     const submitBtn = document.querySelector('.send-btn');
     
@@ -773,7 +775,15 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
     }
 
     const el = uiModule.el;
-    const msg = el('message').value;
+    let msg = el('message').value;
+    // ── /image <prompt> → make it an explicit image request. Image generation
+    // is decided by the LLM via the generate_image tool, so we phrase the /image
+    // prefix as a clear "generate an image" instruction it will act on.
+    if (msg.trim().startsWith('/image')) {
+      const _stripped = msg.trim().slice(6).replace(/^\s+/, '');
+      msg = _stripped ? `Generate an image: ${_stripped}` : _stripped;
+      el('message').value = msg;
+    }
     // Allow empty text when a regen carries over the original message's
     // attachment ids — a photo-only message still has something to send.
     if (!msg.trim() && !fileHandlerModule.getPendingCount() && !(_pendingRegenAttachments && _pendingRegenAttachments.length)) { _releaseSendFlag(); return; }
@@ -1164,6 +1174,8 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       if (_inject.suffix) _finalMsgWithInject = _finalMsgWithInject + ' ' + _inject.suffix;
 
       const fd = new FormData();
+      // Image generation is decided by the LLM via the generate_image tool, so
+      // the composer just sends the message — no image_mode flag anymore.
       fd.append('message', _finalMsgWithInject);
       fd.append('session', streamSessionId);
       if (ids.length) fd.append('attachments', JSON.stringify(ids));
@@ -1417,6 +1429,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
       let roundHolder = holder;       // Current AI text bubble (changes per round)
       let roundText = '';             // Text accumulated for current round
       let currentToolBubble = null;   // Current tool execution bubble
+      let _pendingImageBubble = null; // Placeholder photo bubble awaiting image_url
       let lastToolThread = null;      // Visible tool timeline for tool-only turns
       let roundFinalized = false;     // Whether current round's text is finalized
       let _sourcesHtml = '';          // Sources box HTML to prepend to body
@@ -1779,6 +1792,11 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                 }
                 if (_liveThinkHeader) _liveThinkHeader.textContent = 'View thinking process';
                 if (_liveThinkSpinnerSlot) _liveThinkSpinnerSlot.remove();
+                // Collapse the thinking box by default once thinking ends — it
+                // streams expanded live, but the resting state must be collapsed
+                // (content hidden) until the user clicks the header to expand.
+                if (_liveThinkContent) _liveThinkContent.classList.remove('expanded');
+                if (_liveThinkToggle) _liveThinkToggle.classList.remove('expanded');
                 if (_liveThinkTimerEl && _elapsedDone) {
                   _liveThinkTimerEl.textContent = _formatThinkStats(_elapsedDone, _liveThinkTokenCount);
                   _liveThinkTimerEl.style.marginLeft = 'auto';
@@ -1958,7 +1976,9 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                   thinkingStartTime = Date.now();
                   if (spinner && spinner.element) spinner.destroy();
 
-                  // Create a live thinking box — starts expanded so content streams visibly
+                  // Create a live thinking box — starts COLLAPSED so the content
+                  // is captured but hidden; it only drops down when the user
+                  // clicks the header (no default expand during streaming).
                   var thinkBody = roundHolder.querySelector('.body');
                   var thinkContent = _ensureStreamLayout(thinkBody);
                   thinkContent.style.minHeight = '';
@@ -1969,9 +1989,9 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                         <div class="thinking-header-left"><span class="live-think-header-text">Thinking\u2026</span></div>
                         <span class="live-think-spinner-slot" style="flex-shrink:0;margin-left:auto;"></span>
                         <span class="live-think-timer" style="font-size:11px;opacity:0.4;font-variant-numeric:tabular-nums;margin-left:6px;margin-right:5px;"></span>
-                        <span class="thinking-toggle live-think-toggle expanded" id="${_liveThinkDomId}-toggle"></span>
+                        <span class="thinking-toggle live-think-toggle" id="${_liveThinkDomId}-toggle"></span>
                       </div>
-                      <div class="thinking-content expanded" id="${_liveThinkDomId}">
+                      <div class="thinking-content" id="${_liveThinkDomId}">
                         <div class="thinking-content-inner live-think-inner"></div>
                       </div>
                     </div>`;
@@ -2062,6 +2082,11 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                   }
                   if (_liveThinkHeader) _liveThinkHeader.textContent = 'View thinking process';
                   if (_liveThinkSpinnerSlot) _liveThinkSpinnerSlot.remove();
+                  // Collapse the thinking box by default once thinking ends — it
+                  // streams expanded live, but the resting state must be collapsed
+                  // (content hidden) until the user clicks the header to expand.
+                  if (_liveThinkContent) _liveThinkContent.classList.remove('expanded');
+                  if (_liveThinkToggle) _liveThinkToggle.classList.remove('expanded');
                   // Move timer to right side of header
                   if (_liveThinkTimerEl && elapsed) {
                     _liveThinkTimerEl.textContent = _formatThinkStats(elapsed, _liveThinkTokenCount);
@@ -2493,11 +2518,18 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                   if (spinner && spinner.element) spinner.destroy();
                   const dt = markdownModule.normalizeThinkingMarkup(_streamDisplayText(roundText));
                   if (dt.trim()) {
-                    var _body3 = roundHolder.querySelector('.body');
-                    var _contentEl3 = _ensureStreamLayout(_body3);
-                    _contentEl3.style.minHeight = '';  // clear streaming inflate
-                    _contentEl3.innerHTML = markdownModule.processWithThinking(markdownModule.squashOutsideCode(dt));
-                    if (window.hljs) roundHolder.querySelectorAll('pre code').forEach((b) => window.hljs.highlightElement(b));
+                    // Image generation: the photo bubble is the only thing we
+                    // show, so hide any residual "Generated image for: …" echo
+                    // the model may emit instead of rendering it as text.
+                    if (dt.trim().startsWith('Generated image for:')) {
+                      roundHolder.style.display = 'none';
+                    } else {
+                      var _body3 = roundHolder.querySelector('.body');
+                      var _contentEl3 = _ensureStreamLayout(_body3);
+                      _contentEl3.style.minHeight = '';  // clear streaming inflate
+                      _contentEl3.innerHTML = markdownModule.processWithThinking(markdownModule.squashOutsideCode(dt));
+                      if (window.hljs) roundHolder.querySelectorAll('pre code').forEach((b) => window.hljs.highlightElement(b));
+                    }
                   } else {
                     roundHolder.style.display = 'none';
                   }
@@ -2509,6 +2541,19 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                 // --- Thread timeline: group tools in a thread container ---
                 const cmd = json.command || '';
                 const chatBox = document.getElementById('chat-history');
+                // Image generation: show the photo placeholder (particle loader)
+                // immediately instead of the generic tool card, so the animation
+                // runs from generation start. The "generate_image" card above the
+                // photo is suppressed.
+                if (json.tool === 'generate_image') {
+                  const _sizeMatch = /(\d+)[x:](\d+)/.exec(cmd);
+                  const _size = _sizeMatch ? _sizeMatch[1] + 'x' + _sizeMatch[2] : '';
+                  _pendingImageBubble = chatRenderer.createImagePlaceholder(_size);
+                  chatBox.appendChild(_pendingImageBubble);
+                  uiModule.scrollHistory();
+                  currentToolBubble = null;
+                  continue;
+                }
                 // Find existing thread to append to — check last few children
                 // (agent_step may insert an empty msg-ai between tool rounds)
                 let threadWrap = null;
@@ -2608,6 +2653,11 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
 
               } else if (json.type === 'tool_output') {
                 if (_isBg) continue;
+                // Image generation: the photo (separate bubble) is the only
+                // output we surface — blank the redundant "Generated image for:"
+                // tool text so it never renders (the agent-thread node itself is
+                // already suppressed at tool_start for this tool).
+                if (json.tool === 'generate_image') json.output = '';
                 // --- Update the current thread node ---
                 if (currentToolBubble) {
                   // Stop wave animation + the per-second cooking ticker
@@ -2666,11 +2716,44 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
                 }
                 // --- Render generated images inline ---
                 if (json.image_url) {
-                  const chatBox = document.getElementById('chat-history');
-                  chatBox.appendChild(_buildImageBubble(json.image_url, json.image_prompt, json.image_model, json.image_size, json.image_quality, json.image_id));
+                  const chatBox2 = document.getElementById('chat-history');
+                  if (_pendingImageBubble) {
+                    chatRenderer.fillImagePlaceholder(_pendingImageBubble, json.image_url, json.image_prompt, json.image_model, json.image_size, json.image_quality, json.image_id);
+                    _pendingImageBubble = null;
+                  } else {
+                    chatBox2.appendChild(_buildImageBubble(json.image_url, json.image_prompt, json.image_model, json.image_size, json.image_quality, json.image_id));
+                  }
                   uiModule.scrollHistory();
                   // Notify gallery to refresh if open
                   window.dispatchEvent(new CustomEvent('gallery-refresh'));
+                }
+                // --- Render image-generation errors clearly ---
+                if (json.tool === 'generate_image' && json.exit_code && Number(json.exit_code) !== 0 && !json.image_url) {
+                  if (_pendingImageBubble) {
+                    // Reuse the placeholder as the error state (no duplicate card).
+                    const frame = _pendingImageBubble.querySelector('.gen-image-frame');
+                    if (frame) {
+                      frame.classList.add('loaded', 'gen-image-error');
+                      const lbl = document.createElement('div');
+                      lbl.className = 'gen-image-unavailable-label';
+                      lbl.textContent = (json.output && json.output.trim()) ? json.output.trim().slice(0, 120) : 'Image generation failed.';
+                      frame.appendChild(lbl);
+                    }
+                    _pendingImageBubble = null;
+                  } else {
+                    const chatBox = document.getElementById('chat-history');
+                    if (chatBox) {
+                      const errWrap = document.createElement('div');
+                      errWrap.className = 'msg msg-ai';
+                      const ebody = document.createElement('div');
+                      ebody.className = 'body';
+                      ebody.style.cssText = 'color:var(--red);border-left:3px solid var(--red);padding:6px 8px;background:color-mix(in srgb,var(--red) 8%,transparent);border-radius:4px;';
+                      ebody.textContent = (json.output && json.output.trim()) ? json.output : 'Image generation failed.';
+                      errWrap.appendChild(ebody);
+                      chatBox.appendChild(errWrap);
+                      uiModule.scrollHistory();
+                    }
+                  }
                 }
                 // --- Render browser screenshots in tool output ---
                 if (json.screenshot && currentToolBubble) {
@@ -3449,7 +3532,7 @@ import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composer
             if (_box && sessionModule.getCurrentSessionId() === _timeoutSessionId) {
               var _timeoutMsg = document.createElement('div');
               _timeoutMsg.className = 'msg msg-ai';
-              _timeoutMsg.innerHTML = '<div class="role">Odysseus</div><div class="body" style="opacity:0.6;font-style:italic;">Research clarification timed out. Toggle research again to start over.</div>';
+              _timeoutMsg.innerHTML = '<div class="role">Aigenchain</div><div class="body" style="opacity:0.6;font-style:italic;">Research clarification timed out. Toggle research again to start over.</div>';
               _box.appendChild(_timeoutMsg);
               uiModule.scrollHistory();
             }

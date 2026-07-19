@@ -1454,6 +1454,17 @@ def setup_model_routes(model_discovery):
                     "offline": True,
                 })
 
+        # NOTE: The active Image API Provider (e.g. Cloudflare flux) is
+        # deliberately NOT injected into the model picker. Image generation is
+        # now triggered automatically by user intent (see chat_routes image
+        # fast-path), which always routes image prompts to the active provider
+        # regardless of the chat model. Exposing flux as a selectable chat model
+        # caused it to be picked/stuck as the session model, and since flux does
+        # not speak the chat contract every non-image turn then failed with
+        # "No model endpoint configured" (503). Keeping it out of the picker
+        # means the session always keeps a real chat model (e.g. OpenCode Zen)
+        # while images still work via intent detection.
+
         return {"hosts": [], "items": items}
 
     @router.get("/models")

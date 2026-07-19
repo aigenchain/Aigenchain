@@ -127,6 +127,7 @@ class SessionManager:
             model=db_session.model,
             rag=db_session.rag,
             archived=db_session.archived,
+            is_image=bool(getattr(db_session, "is_image", False) or False),
             headers=headers,
             history=[],
             owner=getattr(db_session, "owner", None),
@@ -185,6 +186,7 @@ class SessionManager:
             model=db_session.model,
             rag=db_session.rag,
             archived=db_session.archived,
+            is_image=bool(getattr(db_session, "is_image", False) or False),
             headers=headers,
             history=history,
             owner=getattr(db_session, 'owner', None),
@@ -416,6 +418,7 @@ class SessionManager:
             session.headers = headers or {}
             session.rag = db_session.rag
             session.archived = db_session.archived
+            session.is_image = bool(getattr(db_session, "is_image", False) or False)
             session.owner = getattr(db_session, "owner", None)
             session.is_important = getattr(db_session, "is_important", False) or False
             session.message_count = getattr(db_session, "message_count", session.message_count) or 0

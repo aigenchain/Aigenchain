@@ -34,6 +34,17 @@ from src.integrations import (
     INTEGRATION_PRESETS,
     migrate_from_settings,
 )
+from src import image_providers as _imgprov
+from src.image_providers import (
+    IMAGE_PROVIDER_DEFS,
+    list_providers_masked,
+    get_provider,
+    add_provider,
+    update_provider,
+    delete_provider,
+    set_active_provider,
+    test_provider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -832,5 +843,83 @@ def setup_auth_routes(auth_manager: AuthManager) -> APIRouter:
         if result.get("exit_code", 1) == 0:
             return {"ok": True, "message": "Connection successful"}
         return {"ok": False, "message": (result.get("error") or "Connection failed")[:300]}
+
+    # ---- Image generation API providers ----
+    # Clean, self-contained layer for image-gen services (Cloudflare Workers
+    # AI, OpenAI-compatible, ...) managed through the Settings UI. Distinct
+    # from the generic REST "Integrations" store.
+
+    @router.get("/image-providers")
+    async def list_image_providers_route(request: Request):
+        """List all image providers (admin only, secrets masked)."""
+        user = _get_current_user(request)
+        if not user or not auth_manager.is_admin(user):
+            raise HTTPException(403, "Admin only")
+        return {"providers": list_providers_masked()}
+
+    @router.get("/image-providers/definitions")
+    async def image_provider_definitions_route(request: Request):
+        """Return provider field definitions so the UI can render a dynamic form."""
+        user = _get_current_user(request)
+        if not user or not auth_manager.is_admin(user):
+            raise HTTPException(403, "Admin only")
+        return {"definitions": IMAGE_PROVIDER_DEFS}
+
+    @router.post("/image-providers")
+    async def create_image_provider_route(request: Request):
+        """Create a new image provider (admin only)."""
+        user = _get_current_user(request)
+        if not user or not auth_manager.is_admin(user):
+            raise HTTPException(403, "Admin only")
+        body = await request.json()
+        item = add_provider(body)
+        return {"ok": True, "provider": _imgprov._mask_provider(item)}
+
+    @router.put("/image-providers/{provider_id}")
+    async def update_image_provider_route(provider_id: str, request: Request):
+        """Update an existing image provider (admin only)."""
+        user = _get_current_user(request)
+        if not user or not auth_manager.is_admin(user):
+            raise HTTPException(403, "Admin only")
+        body = await request.json()
+        item = update_provider(provider_id, body)
+        if not item:
+            raise HTTPException(404, "Image provider not found")
+        return {"ok": True, "provider": _imgprov._mask_provider(item)}
+
+    @router.delete("/image-providers/{provider_id}")
+    async def delete_image_provider_route(provider_id: str, request: Request):
+        """Delete an image provider (admin only)."""
+        user = _get_current_user(request)
+        if not user or not auth_manager.is_admin(user):
+            raise HTTPException(403, "Admin only")
+        ok = delete_provider(provider_id)
+        if not ok:
+            raise HTTPException(404, "Image provider not found")
+        return {"ok": True}
+
+    @router.post("/image-providers/{provider_id}/activate")
+    async def activate_image_provider_route(provider_id: str, request: Request):
+        """Mark a provider as the single active one (admin only)."""
+        user = _get_current_user(request)
+        if not user or not auth_manager.is_admin(user):
+            raise HTTPException(403, "Admin only")
+        item = set_active_provider(provider_id)
+        if not item:
+            raise HTTPException(404, "Image provider not found")
+        return {"ok": True, "provider": _imgprov._mask_provider(item)}
+
+    @router.post("/image-providers/{provider_id}/test")
+    async def test_image_provider_route(provider_id: str, request: Request):
+        """Test connectivity with a real (tiny) image generation (admin only)."""
+        user = _get_current_user(request)
+        if not user or not auth_manager.is_admin(user):
+            raise HTTPException(403, "Admin only")
+        item = get_provider(provider_id)
+        if not item:
+            raise HTTPException(404, "Image provider not found")
+        # Run the blocking HTTP call off the event loop.
+        result = await asyncio.to_thread(test_provider, item)
+        return result
 
     return router

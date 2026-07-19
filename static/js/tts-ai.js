@@ -186,10 +186,17 @@ class AITTSManager {
             const audioUrl = await this.synthesize(text);
 
             this.currentAudio = new Audio(audioUrl);
-            await this.currentAudio.play();
-            this.isPlaying = true;
-            // Note: onended should be set by the caller (addAITTSButton)
-            // to reset button state when audio finishes
+            // Resolve only when playback actually ends, so callers (e.g. the
+            // Voice Call loop) can wait for the spoken reply to finish before
+            // listening again. stop() (barge-in / end call) pauses the element
+            // without firing `ended`, so the promise stays pending — the caller
+            // guards the transition with its own flag.
+            await new Promise((resolve, reject) => {
+                this.currentAudio.onended = () => { this.isPlaying = false; resolve(); };
+                this.currentAudio.onerror = () => { this.isPlaying = false; reject(new Error('Audio playback error')); };
+                this.currentAudio.play().catch(reject);
+                this.isPlaying = true;
+            });
 
         } catch (error) {
             console.error('Failed to play audio:', error);
@@ -435,13 +442,61 @@ class AITTSManager {
         var plainText = this.extractPlainText(text);
         if (!plainText) return;
 
+        // The Voice Call path never streams sentence-by-sentence (callController.js
+        // defers speaking until the answer is final & stripped), so `remaining` is
+        // the WHOLE reply. Enqueueing it as a single SpeechSynthesisUtterance makes
+        // Chrome/Edge silently truncate after ~15s ("starts reading, then dies"),
+        // because the engine caps one utterance's playback. Split it into sentences
+        // and speak them sequentially, like _processStreamingSentences does live.
         var remaining = plainText.substring(this._streamSentencesSent).trim();
-        if (remaining.length >= 15) {
-            var btn = this._streamButton || this._createPlaceholderButton();
-            var resetFn = this._streamResetFn || function() {};
-            this.enqueue(remaining, btn, resetFn);
-        }
         this._streamSentencesSent = 0;
+        if (!remaining) return;
+
+        var btn = this._streamButton || this._createPlaceholderButton();
+        var resetFn = this._streamResetFn || function() {};
+
+        // Merge short fragments into the next sentence so nothing is dropped
+        // (a trailing "Yes." must still be spoken, not skipped like the old
+        // `remaining.length >= 15` gate did for short replies).
+        var pending = '';
+        var sentences = this._splitSentences(remaining);
+        for (var i = 0; i < sentences.length; i++) {
+            pending += (pending ? ' ' : '') + sentences[i];
+            var isLast = i === sentences.length - 1;
+            if (pending.trim().length >= 15 || isLast) {
+                this.enqueue(pending.trim(), btn, resetFn);
+                pending = '';
+            }
+        }
+    }
+
+    // Split plain text into sentences at ".!?" + whitespace, mirroring the
+    // boundary logic in _processStreamingSentences (without its drop-short
+    // behavior). Initialisms like "3." or "U.S." are not treated as breaks,
+    // and an over-long run-on is broken at a word boundary (~200 chars) so a
+    // single utterance never approaches the browser's ~15s truncation cap.
+    _splitSentences(text) {
+        var sentences = [];
+        var current = '';
+        for (var i = 0; i < text.length; i++) {
+            var ch = text[i];
+            var next = text[i + 1];
+            current += ch;
+            if ((ch === '.' || ch === '!' || ch === '?') && next && /\s/.test(next)) {
+                var lastWord = current.trim().split(/\s/).pop() || '';
+                if (/^\d+\.$/.test(lastWord)) continue;       // "3."
+                if (/^[A-Z][a-z]?\.$/.test(lastWord)) continue; // "U.S."
+                sentences.push(current.trim());
+                current = '';
+                continue;
+            }
+            if (current.length >= 200 && /\s/.test(ch)) {
+                sentences.push(current.trim());
+                current = '';
+            }
+        }
+        if (current.trim()) sentences.push(current.trim());
+        return sentences;
     }
 
     clearCache() {

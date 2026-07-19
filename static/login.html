@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-visual">
-<title>Odysseus — Login</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 4L16 22L6 22Z' fill='%23e06c75'/%3E%3Cpath d='M16 8L16 22L24 22Z' fill='%23e06c75' opacity='0.6'/%3E%3Cpath d='M4 24Q10 20 16 24Q22 28 28 24' stroke='%23e06c75' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<title>Aigenchain — Login</title>
+<link rel="icon" type="image/svg+xml" href="/static/icons/AigenchainFavicon.svg">
 <link rel="manifest" href="/static/manifest.json">
 <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
 <script nonce="{{CSP_NONCE}}">
@@ -16,12 +16,12 @@
     dark:'none', light:'dots', midnight:'rain', paper:'dots',
     cyberpunk:'synapse', retrowave:'embers', forest:'petals',
     ocean:'constellations', terminal:'perlin-flow', organs:'rain',
-    ume:'petals', cute:'sparkles'
+    ume:'petals', cute:'sparkles', lavender:'petals'
   };
   var THEME_DEFAULT_EFFECT_COLOR = {
-    midnight:'#ffffff', organs:'#451616', cute:'#ff8cb8', ume:'#f5a0c0'
+    midnight:'#ffffff', organs:'#451616', cute:'#ff8cb8', ume:'#f5a0c0', lavender:'#b48ad4'
   };
-  var THEME_DEFAULT_INTENSITY = { midnight:0.5, terminal:0.8, organs:0.65 };
+  var THEME_DEFAULT_INTENSITY = { midnight:0.5, terminal:0.8, organs:0.65, lavender:0.6 };
   try {
     var t = JSON.parse(localStorage.getItem('odysseus-theme'));
     var s = document.documentElement.style;
@@ -62,7 +62,7 @@
     // login feels consistent with the rest of the app). Per-theme
     // bgEffectColor/Intensity defaults still apply so the random
     // pattern picks up theme-appropriate tinting.
-    var name = (t && t.name) || '';
+    var name = (t && t.name) || 'lavender';
     // perlin-flow excluded — too visually intense for a login screen.
     var PATTERNS = ['dots','synapse','rain','constellations','petals','sparkles','embers'];
     var pattern = PATTERNS[Math.floor(Math.random() * PATTERNS.length)];
@@ -92,9 +92,11 @@
      localStorage — renders the login page in the same palette as the rest
      of the app instead of a different greys+offwhite scheme. */
   :root {
-    --bg: #282c34; --fg: #9cdef2; --panel: #111; --border: #355a66;
-    --red: #e06c75; --green: #50fa7b;
-    --bg-effect-intensity: 1;
+    /* Default (no saved theme) = lavender, matching the app's DEFAULT_THEME
+       so the first-run login + app are visually consistent. */
+    --bg: #f3eef8; --fg: #3d3551; --panel: #faf7ff; --border: #cec3de;
+    --red: #9b6dcc; --green: #7cb871;
+    --bg-effect-intensity: 0.6;
   }
   /* Background patterns — mirrors static/style.css "Background Patterns"
      block so the theme's chosen bgPattern renders on login too. The
@@ -133,17 +135,17 @@
   .logo {
     text-align: center; margin-bottom: 1.5rem;
   }
-  .logo span {
-    font-family: 'Fira Code', monospace;
-    font-size: 2rem; font-weight: 600;
-    letter-spacing: 0.04em;
-    /* Same gradient as the main app's welcome-screen "Odysseus" title
-       (static/style.css #welcome-screen .welcome-name) so the brand
-       wordmark is consistent across login + first-launch screens. */
+  /* Brand wordmark — theme-adaptive via CSS mask + brand gradient, mirroring
+     the main app's .brand-logo-mark (static/style.css) and the welcome/sidebar
+     logos so the login screen reads on the user's saved theme. Renders the
+     AigenchainLogo.svg wordmark recolored to --brand-color (falls back to the
+     brand red when the user hasn't customized the theme). */
+  .login-logo-mark {
+    display: inline-block;
+    width: 240px; max-width: 80%; height: 52px;
     background: linear-gradient(135deg, var(--brand-color, var(--red)), color-mix(in srgb, var(--brand-color, var(--red)) 60%, var(--fg)));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    -webkit-mask: url('/static/icons/AigenchainLogo.svg') no-repeat center / contain;
+            mask: url('/static/icons/AigenchainLogo.svg') no-repeat center / contain;
   }
   .setup-note { color: color-mix(in srgb, var(--fg) 60%, transparent); font-size: 0.8rem; margin-bottom: 1rem; text-align: center; }
   label { display: block; font-size: 0.85rem; margin-bottom: 0.3rem; color: color-mix(in srgb, var(--fg) 65%, transparent); }
@@ -228,7 +230,6 @@
   .remember-toggle:hover .remember-dot {
     border-color: color-mix(in srgb, var(--fg) 40%, transparent);
   }
-  .logo-boat { width: 1.6rem; height: 1.6rem; margin-right: 0.4rem; vertical-align: -0.15em; color: var(--red); }
   .version-label {
     position: fixed; bottom: 12px; right: 16px;
     font-size: 0.7rem; opacity: 0.25;
@@ -253,7 +254,7 @@
 <body>
 <main class="card">
   <h1 class="logo">
-    <svg class="logo-boat" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><path d="M16 4L16 22L6 22Z" fill="currentColor"/><path d="M16 8L16 22L24 22Z" fill="currentColor" opacity="0.6"/><path d="M4 24Q10 20 16 24Q22 28 28 24" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round"/></svg><span>Odysseus</span>
+    <span class="brand-logo-mark login-logo-mark" role="img" aria-label="Aigenchain"></span>
   </h1>
   <p class="setup-note" id="setupNote" style="display:none"></p>
 

@@ -1165,6 +1165,113 @@ function _wireUploadTile() {
   });
 }
 
+function _wireGenerateTile() {
+  const tile = document.getElementById('gallery-generate-tile');
+  if (!tile || tile.dataset.wired) return;
+  tile.dataset.wired = '1';
+  tile.addEventListener('click', () => _openGenerateModal());
+}
+
+// Text-to-image generation modal. Uses the active Image API Provider
+// (Settings → Image API Providers); the backend does the actual generation
+// and saves the result to the gallery library.
+function _openGenerateModal() {
+  const overlay = document.createElement('div');
+  overlay.className = 'gallery-gen-overlay';
+  overlay.style.cssText =
+    'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9000;' +
+    'display:flex;align-items:center;justify-content:center;padding:16px;';
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  const panel = document.createElement('div');
+  panel.style.cssText =
+    'width:min(520px,100%);max-height:90vh;overflow:auto;background:var(--bg, #1a1a1a);' +
+    'color:var(--fg, #eee);border:1px solid var(--border, #333);border-radius:12px;' +
+    'padding:18px 18px 16px;box-shadow:0 20px 60px rgba(0,0,0,0.5);';
+  panel.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+      <h3 style="margin:0;font-size:15px;">Generate Image</h3>
+      <span style="font-size:10px;opacity:0.5;">via active Image API Provider</span>
+      <button id="gallery-gen-close" style="margin-left:auto;background:none;border:none;color:var(--fg,#eee);font-size:18px;cursor:pointer;opacity:0.6;">&times;</button>
+    </div>
+    <label style="display:block;font-size:12px;opacity:0.7;margin-bottom:4px;">Prompt</label>
+    <textarea id="gallery-gen-prompt" rows="3" placeholder="A serene mountain lake at sunset, photorealistic"
+      style="width:100%;resize:vertical;background:var(--input-bg, #111);color:var(--fg,#eee);border:1px solid var(--border,#333);border-radius:8px;padding:8px;font:inherit;"></textarea>
+    <div style="display:flex;gap:10px;margin-top:10px;">
+      <div style="flex:1;">
+        <label style="display:block;font-size:11px;opacity:0.6;margin-bottom:3px;">Size</label>
+        <select id="gallery-gen-size" style="width:100%;background:var(--input-bg,#111);color:var(--fg,#eee);border:1px solid var(--border,#333);border-radius:8px;padding:7px;font:inherit;">
+          <option value="512x512">512 × 512</option>
+          <option value="768x1024">768 × 1024</option>
+          <option value="1024x768">1024 × 768</option>
+          <option value="1024x1024" selected>1024 × 1024</option>
+        </select>
+      </div>
+      <div style="flex:1;">
+        <label style="display:block;font-size:11px;opacity:0.6;margin-bottom:3px;">Quality</label>
+        <select id="gallery-gen-quality" style="width:100%;background:var(--input-bg,#111);color:var(--fg,#eee);border:1px solid var(--border,#333);border-radius:8px;padding:7px;font:inherit;">
+          <option value="low">Low</option>
+          <option value="medium" selected>Medium</option>
+          <option value="high">High</option>
+        </select>
+      </div>
+    </div>
+    <div id="gallery-gen-msg" style="font-size:11px;min-height:14px;margin-top:8px;"></div>
+    <div id="gallery-gen-preview" style="margin-top:10px;"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+      <button id="gallery-gen-cancel" style="background:none;border:1px solid var(--border,#333);color:var(--fg,#eee);border-radius:8px;padding:8px 14px;cursor:pointer;font:inherit;">Cancel</button>
+      <button id="gallery-gen-go" style="background:var(--accent, #f44);border:none;color:#fff;border-radius:8px;padding:8px 16px;cursor:pointer;font:inherit;font-weight:600;">Generate</button>
+    </div>`;
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  panel.querySelector('#gallery-gen-close').addEventListener('click', close);
+  panel.querySelector('#gallery-gen-cancel').addEventListener('click', close);
+
+  const msg = panel.querySelector('#gallery-gen-msg');
+  const preview = panel.querySelector('#gallery-gen-preview');
+  const goBtn = panel.querySelector('#gallery-gen-go');
+
+  const setMsg = (t, ok) => {
+    msg.textContent = t || '';
+    msg.style.color = ok === true ? 'var(--color-success,#50fa7b)'
+      : ok === false ? 'var(--red,#f44)' : 'color-mix(in srgb, var(--fg,#eee) 50%, transparent)';
+  };
+
+  goBtn.addEventListener('click', async () => {
+    const prompt = panel.querySelector('#gallery-gen-prompt').value.trim();
+    if (!prompt) { setMsg('Enter a prompt first.', false); return; }
+    const size = panel.querySelector('#gallery-gen-size').value;
+    const quality = panel.querySelector('#gallery-gen-quality').value;
+    goBtn.disabled = true; goBtn.textContent = 'Generating…';
+    setMsg('Generating image via Cloudflare…', null);
+    try {
+      const r = await fetch(`${API_BASE}/api/image/generate`, {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, size, quality }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setMsg(d.detail || d.message || `Failed (${r.status})`, false);
+        return;
+      }
+      const img = d.image || {};
+      preview.innerHTML = `
+        <img src="${_esc(img.url)}" alt="${_esc(prompt)}"
+          style="width:100%;border-radius:8px;border:1px solid var(--border,#333);" />
+        <div style="font-size:10px;opacity:0.5;margin-top:4px;">${_esc(img.model || '')} · ${_esc(img.size || '')}</div>`;
+      setMsg('Done! Added to your gallery.', true);
+      window.dispatchEvent(new CustomEvent('gallery-refresh', { detail: { source: 'generate' } }));
+    } catch (e) {
+      setMsg('Generation failed: ' + e, false);
+    } finally {
+      goBtn.disabled = false; goBtn.textContent = 'Generate';
+    }
+  });
+}
+
 // Shimmer placeholder tiles shown while the FIRST page loads, so the grid
 // doesn't pop from empty → full (re-opens keep the old photos via
 // stale-while-revalidate, so skeletons only show when there's nothing yet).
@@ -1195,14 +1302,23 @@ function _renderGrid() {
       </div>
     </div>`;
 
+  const generateTile = `
+    <div class="gallery-card gallery-card-upload" id="gallery-generate-tile" title="Generate an image from a text prompt (active Image API Provider)">
+      <div class="gallery-card-upload-inner">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3m0 12v3m9-9h-3M6 12H3m13.5 6.5l-2.1-2.1M8.6 8.6 6.5 6.5m11 0-2.1 2.1M8.6 15.4l-2.1 2.1"/><circle cx="12" cy="12" r="3.2"/></svg>
+        <div class="gallery-card-upload-label">Generate</div>
+      </div>
+    </div>`;
+
   if (_items.length === 0) {
-    grid.innerHTML = uploadTile + '<div class="gallery-empty">No photos yet. Click Upload or drag-and-drop to get started!</div>';
+    grid.innerHTML = uploadTile + generateTile + '<div class="gallery-empty">No photos yet. Click Upload or drag-and-drop to get started!</div>';
     _wireUploadTile();
+    _wireGenerateTile();
     if (loadMore) loadMore.style.display = 'none';
     return;
   }
 
-  let html = uploadTile;
+  let html = uploadTile + generateTile;
   _items.forEach(img => {
     const date = img.taken_at
       ? new Date(img.taken_at).toLocaleDateString()
@@ -1243,6 +1359,7 @@ function _renderGrid() {
   });
   grid.innerHTML = html;
   _wireUploadTile();
+  _wireGenerateTile();
 
   // Domino-in cascade the first render after opening (not on filter/sort/
   // load-more re-renders) — mirrors the document library.
@@ -1315,6 +1432,125 @@ function _renderGrid() {
 }
 
 // ---- Detail overlay ----
+
+// Wheel / button / double-click zoom + drag-to-pan for the detail image.
+// Purely client-side (view transform only) — does not touch the stored file,
+// so it composes with the server-side rotate without conflict.
+function _setupDetailZoom(detail, img) {
+  const imgEl = detail.querySelector('#gallery-detail-img');
+  const frame = detail.querySelector('.gallery-detail-img-frame');
+  const zoomBar = detail.querySelector('#gallery-detail-zoom');
+  if (!imgEl || !frame) return;
+  // Videos keep their native controls — no custom zoom.
+  if (imgEl.tagName === 'VIDEO') {
+    if (zoomBar) zoomBar.style.display = 'none';
+    return;
+  }
+
+  const MIN = 1, MAX = 6;
+  let scale = 1, tx = 0, ty = 0;
+  const levelEl = detail.querySelector('#gallery-zoom-level');
+
+  const apply = () => {
+    // Clamp translation so the image can't be dragged fully out of view.
+    const r = frame.getBoundingClientRect();
+    const maxX = Math.max(0, (r.width * scale - r.width) / 2);
+    const maxY = Math.max(0, (r.height * scale - r.height) / 2);
+    tx = Math.min(maxX, Math.max(-maxX, tx));
+    ty = Math.min(maxY, Math.max(-maxY, ty));
+    imgEl.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+    imgEl.style.cursor = scale > 1 ? 'grab' : 'zoom-in';
+    frame.classList.toggle('gallery-zoomed', scale > 1);
+    if (levelEl) levelEl.textContent = Math.round(scale * 100) + '%';
+  };
+
+  const reset = () => { scale = 1; tx = 0; ty = 0; apply(); };
+
+  // Zoom toward a focal point (cx,cy relative to frame center).
+  const zoomTo = (next, cx = 0, cy = 0) => {
+    next = Math.min(MAX, Math.max(MIN, next));
+    if (next === scale) return;
+    // Keep the focal point stationary while scaling.
+    const ratio = next / scale;
+    tx = cx - (cx - tx) * ratio;
+    ty = cy - (cy - ty) * ratio;
+    scale = next;
+    if (scale === 1) { tx = 0; ty = 0; }
+    apply();
+  };
+
+  imgEl.style.transformOrigin = 'center center';
+  imgEl.style.transition = 'transform 0.08s ease-out';
+  imgEl.style.willChange = 'transform';
+  reset();
+
+  // Wheel zoom toward cursor.
+  frame.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const r = frame.getBoundingClientRect();
+    const cx = e.clientX - r.left - r.width / 2;
+    const cy = e.clientY - r.top - r.height / 2;
+    const step = e.deltaY < 0 ? 1.2 : 1 / 1.2;
+    zoomTo(scale * step, cx, cy);
+  }, { passive: false });
+
+  // Double-click toggles between fit and 2.5x at the click point.
+  imgEl.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    if (scale > 1) { reset(); return; }
+    const r = frame.getBoundingClientRect();
+    const cx = e.clientX - r.left - r.width / 2;
+    const cy = e.clientY - r.top - r.height / 2;
+    zoomTo(2.5, cx, cy);
+  });
+
+  // Drag to pan when zoomed in.
+  let dragging = false, lastX = 0, lastY = 0;
+  imgEl.addEventListener('pointerdown', (e) => {
+    if (scale <= 1) return;
+    dragging = true;
+    lastX = e.clientX; lastY = e.clientY;
+    imgEl.style.cursor = 'grabbing';
+    imgEl.style.transition = 'none';
+    try { imgEl.setPointerCapture(e.pointerId); } catch (_) {}
+    e.preventDefault();
+  });
+  imgEl.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    tx += e.clientX - lastX;
+    ty += e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    apply();
+  });
+  const endDrag = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    imgEl.style.cursor = scale > 1 ? 'grab' : 'zoom-in';
+    imgEl.style.transition = 'transform 0.08s ease-out';
+    try { imgEl.releasePointerCapture(e.pointerId); } catch (_) {}
+  };
+  imgEl.addEventListener('pointerup', endDrag);
+  imgEl.addEventListener('pointercancel', endDrag);
+
+  // Buttons.
+  detail.querySelector('#gallery-zoom-in-btn')?.addEventListener('click', (e) => { e.stopPropagation(); zoomTo(scale * 1.4); });
+  detail.querySelector('#gallery-zoom-out-btn')?.addEventListener('click', (e) => { e.stopPropagation(); zoomTo(scale / 1.4); });
+  detail.querySelector('#gallery-zoom-reset-btn')?.addEventListener('click', (e) => { e.stopPropagation(); reset(); });
+
+  // Keyboard: +/- to zoom, 0 to reset (only while a photo is open).
+  const onKey = (e) => {
+    if (!document.getElementById('gallery-detail-img')) {
+      document.removeEventListener('keydown', onKey);
+      return;
+    }
+    const tag = (e.target && e.target.tagName) || '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomTo(scale * 1.4); }
+    else if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomTo(scale / 1.4); }
+    else if (e.key === '0') { e.preventDefault(); reset(); }
+  };
+  document.addEventListener('keydown', onKey);
+}
 
 function _openDetail(img) {
   const detail = document.getElementById('gallery-detail');
@@ -1419,6 +1655,18 @@ function _openDetail(img) {
         <button class="gallery-detail-nav gallery-detail-nav-next" id="gallery-detail-next" title="Next (→)" aria-label="Next">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
         </button>
+        <div class="gallery-detail-zoom" id="gallery-detail-zoom">
+          <button class="gallery-detail-zoom-btn" id="gallery-zoom-out-btn" title="Zoom out (−)" aria-label="Zoom out">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+          <span class="gallery-detail-zoom-level" id="gallery-zoom-level">100%</span>
+          <button class="gallery-detail-zoom-btn" id="gallery-zoom-in-btn" title="Zoom in (+)" aria-label="Zoom in">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+          <button class="gallery-detail-zoom-btn" id="gallery-zoom-reset-btn" title="Reset zoom (0)" aria-label="Reset zoom">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-6.36 2.64L3 8"/><polyline points="3 3 3 8 8 8"/></svg>
+          </button>
+        </div>
       </div>
       <div class="gallery-detail-sidebar">
         <div class="gallery-detail-section">
@@ -1666,6 +1914,9 @@ function _openDetail(img) {
     _imgEl.addEventListener('error', _done, { once: true });
   }
 
+  // Zoom & pan on the detail image (skips videos).
+  _setupDetailZoom(detail, img);
+
   // Prev/Next navigation
   const curIdx = _items.findIndex(i => i.id === img.id);
   const prevBtn = document.getElementById('gallery-detail-prev');
@@ -1691,6 +1942,8 @@ function _openDetail(img) {
     wrap.addEventListener('touchstart', (e) => {
       if (e.touches.length !== 1) { tracking = false; return; }
       if (e.target.closest('video, button')) { tracking = false; return; }
+      // When the photo is zoomed in, one-finger drag pans instead of paging.
+      if (wrap.querySelector('.gallery-detail-img-frame.gallery-zoomed')) { tracking = false; return; }
       const t = e.touches[0];
       sx = t.clientX; sy = t.clientY; st = Date.now();
       tracking = true;
