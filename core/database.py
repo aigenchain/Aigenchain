@@ -2665,6 +2665,155 @@ def get_router_decisions_summary(*, since: datetime = None):
         logger.warning("Failed to summarise router decisions", exc_info=True)
         return {"total": 0}
 
+
+def get_router_decisions_timeseries(
+    *, bucket: str = "hour", since: datetime = None, until: datetime = None,
+):
+    """Bucket router decisions over time for trend analysis.
+
+    ``bucket`` is "hour" or "day". Each bucket reports volume plus the signals
+    that matter for orchestration/web-search analysis: search-enable rate,
+    auto-escalation rate, knowledge-retrieval rate, average latency, and the
+    per-bucket breakdown by intent category and knowledge source.
+    """
+    bucket = (bucket or "hour").lower()
+    if bucket not in ("hour", "day"):
+        raise ValueError(f"bucket must be 'hour' or 'day', got {bucket!r}")
+    fmt = "%Y-%m-%dT%H:00" if bucket == "hour" else "%Y-%m-%d"
+    try:
+        with get_db_session() as db:
+            q = db.query(RouterDecision)
+            if since is not None:
+                q = q.filter(RouterDecision.created_at >= since)
+            if until is not None:
+                q = q.filter(RouterDecision.created_at < until)
+            rows = [
+                {
+                    "created_at": r.created_at,
+                    "intent_category": r.intent_category,
+                    "knowledge_source": r.knowledge_source,
+                    "auto_escalated": r.auto_escalated,
+                    "search_enabled": r.search_enabled,
+                    "knowledge_retrieval": r.knowledge_retrieval,
+                    "latency_ms": r.latency_ms,
+                }
+                for r in q.order_by(RouterDecision.created_at.asc()).all()
+            ]
+        buckets: dict = {}
+        for r in rows:
+            if not r["created_at"]:
+                continue
+            key = r["created_at"].strftime(fmt)
+            b = buckets.get(key)
+            if b is None:
+                b = buckets[key] = {
+                    "bucket": key,
+                    "total": 0,
+                    "search_enabled": 0,
+                    "auto_escalated": 0,
+                    "knowledge_retrieval": 0,
+                    "by_category": {},
+                    "by_knowledge_source": {},
+                    "_latency": [],
+                }
+            b["total"] += 1
+            if r["search_enabled"]:
+                b["search_enabled"] += 1
+            if r["auto_escalated"]:
+                b["auto_escalated"] += 1
+            if r["knowledge_retrieval"]:
+                b["knowledge_retrieval"] += 1
+            cat = r["intent_category"] or ""
+            b["by_category"][cat] = b["by_category"].get(cat, 0) + 1
+            ks = r["knowledge_source"] or "none"
+            b["by_knowledge_source"][ks] = b["by_knowledge_source"].get(ks, 0) + 1
+            if r["latency_ms"] is not None:
+                b["_latency"].append(r["latency_ms"])
+        series = []
+        for key in sorted(buckets.keys()):
+            b = buckets[key]
+            lat = sorted(b.pop("_latency"))
+            n = b["total"] or 1
+            b["search_enabled_rate"] = round(b["search_enabled"] / n, 4)
+            b["auto_escalated_rate"] = round(b["auto_escalated"] / n, 4)
+            b["knowledge_retrieval_rate"] = round(b["knowledge_retrieval"] / n, 4)
+            b["avg_latency_ms"] = round(sum(lat) / len(lat), 1) if lat else None
+            series.append(b)
+        return {"bucket": bucket, "count": len(series), "series": series}
+    except ValueError:
+        raise
+    except Exception:
+        logger.warning("Failed to build router decision timeseries", exc_info=True)
+        return {"bucket": bucket, "count": 0, "series": []}
+
+
+# Ordered column list for stable CSV/JSON export output.
+_ROUTER_DECISION_EXPORT_COLUMNS = (
+    "id", "created_at", "session_id", "owner", "message_preview",
+    "requested_mode", "effective_mode", "auto_escalated", "escalation_reason",
+    "intent_category", "search_enabled", "search_trigger", "image_fastpath",
+    "image_clarify", "pending_resolved", "selected_tools", "agent_rounds",
+    "tool_calls", "latency_ms", "outcome", "model", "exit_path",
+    "knowledge_source", "knowledge_reason", "knowledge_retrieval",
+)
+
+
+def iter_router_decisions_for_export(
+    *, since: datetime = None, until: datetime = None, limit: int = 10000,
+):
+    """Yield router decision rows (oldest first) as flat dicts for export.
+
+    ``selected_tools`` (a list) is JSON-encoded so each row is a flat mapping
+    suitable for CSV. Bounded by ``limit`` (capped at 100000).
+    """
+    import json as _json
+    limit = max(1, min(int(limit or 10000), 100000))
+    try:
+        with get_db_session() as db:
+            q = db.query(RouterDecision)
+            if since is not None:
+                q = q.filter(RouterDecision.created_at >= since)
+            if until is not None:
+                q = q.filter(RouterDecision.created_at < until)
+            rows = q.order_by(RouterDecision.created_at.asc()).limit(limit).all()
+            out = []
+            for r in rows:
+                tools = r.selected_tools
+                if isinstance(tools, (list, dict)):
+                    tools = _json.dumps(tools, ensure_ascii=False)
+                out.append({
+                    "id": r.id,
+                    "created_at": r.created_at.isoformat() if r.created_at else "",
+                    "session_id": r.session_id or "",
+                    "owner": r.owner or "",
+                    "message_preview": r.message_preview or "",
+                    "requested_mode": r.requested_mode or "",
+                    "effective_mode": r.effective_mode or "",
+                    "auto_escalated": bool(r.auto_escalated),
+                    "escalation_reason": r.escalation_reason or "",
+                    "intent_category": r.intent_category or "",
+                    "search_enabled": bool(r.search_enabled),
+                    "search_trigger": r.search_trigger or "",
+                    "image_fastpath": bool(r.image_fastpath),
+                    "image_clarify": bool(r.image_clarify),
+                    "pending_resolved": bool(r.pending_resolved),
+                    "selected_tools": tools if tools is not None else "",
+                    "agent_rounds": r.agent_rounds if r.agent_rounds is not None else "",
+                    "tool_calls": r.tool_calls if r.tool_calls is not None else "",
+                    "latency_ms": r.latency_ms if r.latency_ms is not None else "",
+                    "outcome": r.outcome or "",
+                    "model": r.model or "",
+                    "exit_path": r.exit_path or "",
+                    "knowledge_source": r.knowledge_source or "",
+                    "knowledge_reason": r.knowledge_reason or "",
+                    "knowledge_retrieval": bool(r.knowledge_retrieval),
+                })
+            return out
+    except Exception:
+        logger.warning("Failed to export router decisions", exc_info=True)
+        return []
+
+
 def get_upcoming_events(owner, horizon_days: int = 60, limit: int = 40):
     """Upcoming, non-cancelled events as {uid, title, start} dicts, soonest first.
 

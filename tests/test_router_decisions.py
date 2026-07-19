@@ -231,6 +231,88 @@ def test_summary_empty():
     assert s["latency_ms"]["max"] is None
 
 
+def _insert_at(created_at, **over):
+    """Insert a row with an explicit created_at (bypassing the default) for
+    deterministic time-bucket tests."""
+    import uuid as _uuid
+    data = {k: v for k, v in _base(**over).items() if k in cdb._ROUTER_DECISION_FIELDS}
+    with _TS() as s:
+        s.add(cdb.RouterDecision(id=str(_uuid.uuid4()), created_at=created_at, **data))
+        s.commit()
+
+
+def test_timeseries_hour_buckets():
+    _clear()
+    t0 = datetime(2026, 1, 1, 10, 0, 0)
+    t0b = datetime(2026, 1, 1, 10, 30, 0)
+    t1 = datetime(2026, 1, 1, 11, 15, 0)
+    _insert_at(t0, intent_category="web", search_enabled=True, auto_escalated=True)
+    _insert_at(t0b, intent_category="web", search_enabled=True)
+    _insert_at(t1, intent_category="image", search_enabled=False)
+    out = cdb.get_router_decisions_timeseries(bucket="hour")
+    assert out["bucket"] == "hour"
+    assert out["count"] == 2
+    b0, b1 = out["series"]
+    assert b0["bucket"] == "2026-01-01T10:00"
+    assert b0["total"] == 2
+    assert b0["search_enabled"] == 2
+    assert b0["search_enabled_rate"] == 1.0
+    assert b0["auto_escalated"] == 1
+    assert b0["by_category"]["web"] == 2
+    assert b1["bucket"] == "2026-01-01T11:00"
+    assert b1["total"] == 1
+    assert b1["search_enabled_rate"] == 0.0
+
+
+def test_timeseries_day_buckets():
+    _clear()
+    _insert_at(datetime(2026, 1, 1, 10, 0, 0))
+    _insert_at(datetime(2026, 1, 1, 23, 0, 0))
+    _insert_at(datetime(2026, 1, 2, 1, 0, 0))
+    out = cdb.get_router_decisions_timeseries(bucket="day")
+    assert out["count"] == 2
+    assert out["series"][0]["bucket"] == "2026-01-01"
+    assert out["series"][0]["total"] == 2
+    assert out["series"][1]["bucket"] == "2026-01-02"
+    assert out["series"][1]["total"] == 1
+
+
+def test_timeseries_rejects_bad_bucket():
+    _clear()
+    import pytest
+    with pytest.raises(ValueError):
+        cdb.get_router_decisions_timeseries(bucket="week")
+
+
+def test_export_rows_flat_and_ordered():
+    _clear()
+    _insert_at(datetime(2026, 1, 1, 9, 0, 0), message_preview="first",
+               selected_tools=["web_search", "web_fetch"])
+    _insert_at(datetime(2026, 1, 1, 10, 0, 0), message_preview="second")
+    rows = cdb.iter_router_decisions_for_export()
+    assert len(rows) == 2
+    # Oldest first.
+    assert rows[0]["message_preview"] == "first"
+    assert rows[1]["message_preview"] == "second"
+    # selected_tools JSON-encoded to a string for flat CSV output.
+    assert isinstance(rows[0]["selected_tools"], str)
+    assert "web_search" in rows[0]["selected_tools"]
+    # Every export column present on each row.
+    for col in cdb._ROUTER_DECISION_EXPORT_COLUMNS:
+        assert col in rows[0]
+
+
+def test_export_respects_since_and_limit():
+    _clear()
+    _insert_at(datetime(2026, 1, 1, 8, 0, 0), message_preview="old")
+    _insert_at(datetime(2026, 1, 1, 12, 0, 0), message_preview="new")
+    since = datetime(2026, 1, 1, 10, 0, 0)
+    rows = cdb.iter_router_decisions_for_export(since=since)
+    assert len(rows) == 1
+    assert rows[0]["message_preview"] == "new"
+    assert len(cdb.iter_router_decisions_for_export(limit=1)) == 1
+
+
 def test_decision_survives_session_deletion():
     # SET NULL on session_id: create a session, attach a decision, delete the
     # session, decision remains queryable with session_id nulled.
