@@ -1025,6 +1025,15 @@ async def _startup_event():
             _db.close()
     except Exception as e:
         logger.debug(f"Incognito purge skipped: {e}")
+    # Pre-warm rembg (gallery "remove background"). On Python 3.14 its pymatting
+    # dependency triggers a one-time numba JIT compile (~minutes) on first
+    # import; doing it here — before the server accepts traffic — means user
+    # remove-bg calls are instant instead of timing out mid-compile.
+    try:
+        import rembg  # noqa: F401
+        logger.info("rembg background-removal model pre-warmed")
+    except Exception as _e:
+        logger.warning("rembg pre-warm skipped (remove-bg will attempt lazy load): %s", _e)
     # Strong refs to fire-and-forget startup tasks. Without this, Python may
     # GC tasks created with `asyncio.create_task(...)` before they finish.
     _startup_tasks: list[asyncio.Task] = getattr(app.state, "_startup_tasks", [])

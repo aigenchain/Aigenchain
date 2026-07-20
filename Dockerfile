@@ -97,6 +97,18 @@ RUN pip install --no-cache-dir --no-deps /tmp/aigenchain-wheels/*.whl \
 # Copy app code
 COPY . .
 
+# Bake the rembg background-removal model (u2net.onnx) into the image so the
+# gallery "remove background" feature works offline — no first-run GitHub
+# download (which is flaky from inside the container). The weights live in
+# docker/models/ (gitignored) and are copied here at build time.
+RUN mkdir -p /app/.u2net \
+    && if [ -f docker/models/u2net.onnx ]; then \
+         cp docker/models/u2net.onnx /app/.u2net/u2net.onnx \
+         && chown -R aigenchain /app/.u2net; \
+       else \
+         echo "WARN: docker/models/u2net.onnx missing — remove-bg will download at runtime"; \
+       fi
+
 # Create data directory (mount a volume here for persistence)
 RUN mkdir -p data logs services/cache/search
 

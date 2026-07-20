@@ -17,6 +17,11 @@ services:
       # land under /app/.local for the aigenchain user. Persist them so a
       # container recreate does not silently remove installed serve engines.
       - ${APP_DATA_DIR:-./data}/local:/app/.local:z
+      # rembg numba JIT cache — persist so it isn't re-compiled (~minutes) on
+      # every restart. The u2net.onnx model is seeded into ./data/u2net
+      # (offline, no runtime GitHub download) and mounted here.
+      - ${APP_DATA_DIR:-./data}/u2net:/app/.u2net:z
+      - ${APP_DATA_DIR:-./data}/numba-cache:/app/.cache/numba:z
     extra_hosts:
       # Lets the container reach local services on the Docker host, including
       # Ollama at http://host.docker.internal:11434.
@@ -26,6 +31,7 @@ services:
       - LLM_HOSTS=${LLM_HOSTS:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
+      - NUMBA_CACHE_DIR=/app/.cache/numba
       - RESEARCH_LLM_ENDPOINT=${RESEARCH_LLM_ENDPOINT:-}
       - HF_TOKEN=${HF_TOKEN:-}
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}

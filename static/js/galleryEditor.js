@@ -344,7 +344,7 @@ function _wireAiCommandBox() {
     }
     const p = prompt.toLowerCase();
     try {
-      if (/\b(remove|erase|cut\s*out|transparent)\b.*\b(bg|background)\b|\b(bg|background)\b.*\b(remove|erase|transparent)\b/.test(p)) {
+      if (/\b(remove|erase|cut\s*out|transparent|hapus|hilangkan|buat.*transparan|jadikan.*transparan)\b.*\b(bg|background|latar belakang|latar)\b|\b(bg|background|latar belakang|latar|transparan)\b.*\b(remove|erase|transparent|hapus|hilangkan|transparan)\b|\b(jadikan|buat).*transparan\b/.test(p)) {
         _clickToolButton('rembg');
         _runExistingButton('ge-rembg-run', 'Removing background...');
         return;

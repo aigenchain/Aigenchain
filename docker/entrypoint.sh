@@ -140,6 +140,16 @@ export PATH="/app/.local/bin:$PATH"
 # || true so a setup failure never prevents the container from starting.
 "$GOSU_BIN" "$ODY_USER" "$PYTHON_BIN" /app/setup.py || true
 
+# Pre-warm rembg (gallery "remove background") so the numba JIT cache for
+# pymatting is compiled once at startup instead of on the first user request
+# (the compile can take ~minutes on first run, which would time out the API).
+# NUMBA_CACHE_DIR is set in compose so the cache persists under /app/.cache.
+if [ -n "${NUMBA_CACHE_DIR:-}" ]; then
+  mkdir -p "${NUMBA_CACHE_DIR}"
+  chown -R "$ODY_USER" "${NUMBA_CACHE_DIR}" 2>/dev/null || true
+  "$GOSU_BIN" "$ODY_USER" "$PYTHON_BIN" -c "import rembg" 2>/dev/null || true
+fi
+
 # Drop root and run the actual app. `gosu` is preferred over `su` /
 # `sudo` because it cleans up the process tree (no extra shell layer)
 # so signals (SIGTERM from `docker stop`) reach uvicorn directly.

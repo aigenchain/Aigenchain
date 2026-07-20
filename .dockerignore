@@ -34,6 +34,10 @@ docs/
 *.db
 *.sqlite
 *.sqlite3
+# Baked-in rembg model weights — keep in the build context despite the
+# *.onnx exclusion above so the image ships offline background removal.
+# The file itself stays out of git via .gitignore (docker/models/).
+!docker/models/u2net.onnx
 /reports/
 /research_data/
 tasks/

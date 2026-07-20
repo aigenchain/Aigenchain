@@ -23,6 +23,11 @@ piper-tts
 # ChromaDB service); fastembed runs local ONNX embeddings.
 chromadb-client
 fastembed
+# Local, on-device background removal for the gallery "AI Edit" → "remove
+# background" action (routes/gallery/gallery_routes.py: remove_background).
+# Runs entirely in-container (no external API), so the feature works offline
+# once this is installed. Pulls onnxruntime (already present via fastembed).
+rembg
 youtube-transcript-api
 # Markdown rendering for research reports (src/visual_report.py).
 # Imported at module-top so it's a hard core dep, not optional.

@@ -1735,7 +1735,10 @@ def setup_gallery_routes() -> APIRouter:
         try:
             from rembg import remove
             cut = remove(crop)
-        except ImportError:
+        except (ImportError, RuntimeError) as _rembg_err:
+            # ImportError: rembg not installed. RuntimeError: e.g. numba JIT
+            # cache failure on newer Python — degrade to the transformers
+            # pipeline rather than 500-ing the whole request.
             try:
                 from transformers import pipeline
                 pipe = pipeline("image-segmentation", model="briaai/RMBG-1.4", trust_remote_code=True)
