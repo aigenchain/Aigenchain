@@ -4,6 +4,7 @@ import os
 import sys
 import asyncio
 import time
+import json
 
 # On Windows, asyncio.create_subprocess_exec/shell require the ProactorEventLoop.
 # When started via `python -m uvicorn` from a terminal, uvicorn sets this
@@ -1004,6 +1005,72 @@ async def _lifespan(app):
 app.router.lifespan_context = _lifespan
 
 
+def _seed_cloudflare_inpaint_endpoint() -> None:
+    """Create (or refresh) a gallery image endpoint for Cloudflare inpaint.
+
+    The gallery editor's AI inpaint buttons need a ``ModelEndpoint`` row of
+    ``model_type == 'image'``. If the user already configured a Cloudflare
+    Workers AI provider (text-to-image) in Settings, we can reuse those
+    credentials to provision a free inpaint endpoint automatically — no manual
+    Endpoints setup. Idempotent: it updates the existing row if present.
+    """
+    from core.database import SessionLocal, ModelEndpoint
+    try:
+        from src.image_providers import load_providers, CLOUDFLARE_VISION_MODEL  # noqa: F401
+    except Exception:
+        return
+    providers = load_providers()
+    cf = next((p for p in providers if (p.get("provider") == "cloudflare")), None)
+    if not cf:
+        return
+    cfg = cf.get("config", {})
+    account_id = (cfg.get("account_id") or "").strip()
+    api_token = (cfg.get("api_token") or "").strip()
+    if not (account_id and api_token):
+        return
+
+    base_url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run"
+    inpaint_model = "@cf/runwayml/stable-diffusion-v1-5-inpainting"
+    endpoint_name = "Cloudflare Inpaint (Workers AI)"
+    db = SessionLocal()
+    try:
+        existing = (
+            db.query(ModelEndpoint)
+            .filter(
+                ModelEndpoint.model_type == "image",
+                ModelEndpoint.name == endpoint_name,
+            )
+            .first()
+        )
+        if existing:
+            # Keep it in sync with the current provider credentials.
+            existing.base_url = base_url
+            existing.api_key = api_token
+            existing.cached_models = json.dumps([inpaint_model])
+            existing.pinned_models = json.dumps([inpaint_model])
+            existing.is_enabled = True
+            existing.endpoint_kind = "api"
+            db.commit()
+            logger.info("Refreshed Cloudflare inpaint endpoint")
+            return
+        ep = ModelEndpoint(
+            id=str(__import__("uuid").uuid4())[:8],
+            name=endpoint_name,
+            base_url=base_url,
+            api_key=api_token,
+            model_type="image",
+            endpoint_kind="api",
+            is_enabled=True,
+            cached_models=json.dumps([inpaint_model]),
+            pinned_models=json.dumps([inpaint_model]),
+        )
+        db.add(ep)
+        db.commit()
+        logger.info("Provisioned Cloudflare inpaint endpoint (free Workers AI inpaint)")
+    finally:
+        db.close()
+
+
 async def _startup_event():
     global upload_cleanup_task
     logger.info("Application starting up...")
@@ -1034,6 +1101,15 @@ async def _startup_event():
         logger.info("rembg background-removal model pre-warmed")
     except Exception as _e:
         logger.warning("rembg pre-warm skipped (remove-bg will attempt lazy load): %s", _e)
+    # Auto-provision a Cloudflare inpaint image endpoint so the gallery editor's
+    # AI "Generate / Remove" buttons work without manual setup — IF the user
+    # already has a Cloudflare (Workers AI) image provider configured for
+    # text-to-image. Reuses the same account_id + api_token, pointed at the free
+    # @cf/runwayml/stable-diffusion-v1-5-inpainting model. Idempotent.
+    try:
+        _seed_cloudflare_inpaint_endpoint()
+    except Exception as _e:
+        logger.warning("Cloudflare inpaint endpoint auto-provision skipped: %s", _e)
     # Strong refs to fire-and-forget startup tasks. Without this, Python may
     # GC tasks created with `asyncio.create_task(...)` before they finish.
     _startup_tasks: list[asyncio.Task] = getattr(app.state, "_startup_tasks", [])

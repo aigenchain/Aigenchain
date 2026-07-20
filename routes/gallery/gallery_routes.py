@@ -87,6 +87,26 @@ def _is_openai_api_base(url: str) -> bool:
         return False
 
 
+# Cloudflare Workers AI inpainting model — free ($0.00/step) on the Free plan,
+# within the daily 10k-Neuron allowance. Inputs are prompt + image + mask, all
+# as arrays of 0-255 byte values (NOT base64 multipart like OpenAI).
+CLOUDFLARE_INPAINT_MODEL = "@cf/runwayml/stable-diffusion-v1-5-inpainting"
+
+
+def _is_cloudflare_endpoint(base: str, model: str = "") -> bool:
+    """True when the endpoint targets Cloudflare Workers AI (api.cloudflare.com)
+    or the selected model is a @cf/... model. Cloudflare inpaint uses its own
+    request shape, so it must be detected before the OpenAI/diffusion branches."""
+    from urllib.parse import urlsplit
+    try:
+        candidate = base if "://" in base else f"https://{base}"
+        if urlsplit(candidate).hostname == "api.cloudflare.com":
+            return True
+    except Exception:
+        pass
+    return bool(model) and model.startswith("@cf/")
+
+
 _GALLERY_ENDPOINT_PATHS = frozenset({
     "/images/edits",
     "/images/generations",
@@ -1214,8 +1234,9 @@ def setup_gallery_routes() -> APIRouter:
             finally:
                 db.close()
 
-        if not base.endswith("/v1"):
-            base += "/v1"
+        if not _is_cloudflare_endpoint(base, chosen_model):
+            if not base.endswith("/v1"):
+                base += "/v1"
 
         is_openai = _is_openai_api_base(base)
 
@@ -1329,6 +1350,101 @@ def setup_gallery_routes() -> APIRouter:
                         return {"image": raw_b64}
             except httpx.TimeoutException:
                 raise HTTPException(504, "OpenAI inpaint timed out (120s)")
+
+        # Cloudflare Workers AI inpaint path — uses @cf/runwayml/stable-diffusion-v1-5-inpainting.
+        # Inputs are prompt + image + mask as arrays of 0-255 byte values (not multipart).
+        # The response is result.image (base64 PNG). Free on the Workers Free plan.
+        elif _is_cloudflare_endpoint(base, chosen_model):
+            import base64, io, re
+            try:
+                from PIL import Image
+            except ImportError:
+                raise HTTPException(500, "Pillow not installed on server")
+            if not api_key:
+                raise HTTPException(400, "Cloudflare endpoint has no api_token stored — edit it in Endpoints settings.")
+            cf_model = chosen_model or CLOUDFLARE_INPAINT_MODEL
+            # base may be either the OpenAI-style (…/v1) base, a bare
+            # api.cloudflare.com host, or a full /ai/run/<model> URL. Normalise to
+            # the account-scoped run URL: https://api.cloudflare.com/client/v4/accounts/{id}/ai/run/{model}
+            acct_match = re.search(r"/accounts/([^/]+)", base)
+            if not acct_match:
+                raise HTTPException(400, "Cloudflare inpaint endpoint must include /accounts/<id> in its base URL.")
+            account_id = acct_match.group(1)
+            cf_url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{cf_model}"
+            try:
+                src_bytes = base64.b64decode(body["image"])
+                mask_bytes = base64.b64decode(body["mask"])
+                source_png = Image.open(io.BytesIO(src_bytes)).convert("RGBA")
+                mask_l = Image.open(io.BytesIO(mask_bytes)).convert("L")
+                # Cloudflare's image[]/mask[] inputs are the RAW PNG FILE BYTES
+                # as an array of 0-255 integers (NOT decoded pixel arrays, and NOT
+                # base64 — that trips "cannot identify image file"). The SD
+                # convention is white (255) = inpaint region, which the editor
+                # already sends (painted pixels are opaque/white on the mask).
+                img_arr = list(src_bytes)
+                mask_arr = list(mask_bytes)
+            except HTTPException:
+                raise
+            except Exception:
+                logger.exception("inpaint_proxy: failed to prepare Cloudflare request")
+                raise HTTPException(400, "Failed to prepare Cloudflare inpaint request")
+            cf_payload = {
+                "prompt": body.get("prompt", ""),
+                "image": img_arr,
+                "mask": mask_arr,
+            }
+            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+            try:
+                async with httpx.AsyncClient(timeout=120) as client:
+                    r = await client.post(cf_url, json=cf_payload, headers=headers)
+                    if r.status_code != 200:
+                        msg = ""
+                        try:
+                            err = r.json()
+                            errors = err.get("errors") or []
+                            if errors and isinstance(errors[0], dict):
+                                msg = errors[0].get("message", "")
+                            msg = msg or err.get("message", "") or err.get("error", "")
+                        except Exception:
+                            pass
+                        msg = (msg or r.text or f"HTTP {r.status_code}")[:300]
+                        logger.error("inpaint_proxy Cloudflare: status %s %s", r.status_code, msg)
+                        raise HTTPException(r.status_code, f"Cloudflare inpaint failed: {msg}")
+                    # The Cloudflare REST API returns the generated image as a
+                    # raw PNG (image/png), while the Workers AI binding returns
+                    # JSON. Handle both: if the body is JSON with result.image,
+                    # use that; otherwise treat the raw body as the PNG bytes.
+                    raw_b64 = None
+                    ctype = (r.headers.get("content-type") or "").lower()
+                    if "json" in ctype:
+                        try:
+                            data = r.json()
+                            result = data.get("result") or {}
+                            if isinstance(result, dict):
+                                raw_b64 = result.get("image")
+                        except Exception:
+                            pass
+                    if not raw_b64:
+                        if "image" in ctype or r.content[:4] == b"\x89PNG":
+                            raw_b64 = base64.b64encode(r.content).decode()
+                        else:
+                            raise HTTPException(502, "Cloudflare inpaint returned no image")
+                    # Cloudflare returns the full image; composite with the
+                    # original using the user's mask so only the masked region
+                    # changes (matches the OpenAI behaviour the editor expects).
+                    try:
+                        generated = Image.open(io.BytesIO(base64.b64decode(raw_b64))).convert("RGBA")
+                        if generated.size != source_png.size:
+                            generated = generated.resize(source_png.size, Image.LANCZOS)
+                        blended = Image.composite(generated, source_png, mask_l)
+                        out_buf = io.BytesIO()
+                        blended.save(out_buf, format="PNG")
+                        return {"image": base64.b64encode(out_buf.getvalue()).decode()}
+                    except Exception as comp_err:
+                        logger.warning(f"Cloudflare inpaint compose failed, returning raw: {comp_err}")
+                        return {"image": raw_b64}
+            except httpx.TimeoutException:
+                raise HTTPException(504, "Cloudflare inpaint timed out (120s)")
 
         # Self-hosted diffusion server path
         try:

@@ -5,6 +5,11 @@ services:
     ports:
       - "${APP_BIND:-127.0.0.1}:${APP_PORT:-7000}:7000"
     volumes:
+      # Live source mount — keeps the running container in sync with the host
+      # repo so Python changes (routes, app.py, …) take effect without a full
+      # image rebuild. Subpath volumes below (data/, .u2net, numba-cache, …)
+      # take precedence over this mount for their specific paths.
+      - .:/app:z
       - ${APP_DATA_DIR:-./data}:/app/data:z
       - ${APP_LOGS_DIR:-./logs}:/app/logs:z
       # Cookbook remote-server SSH identity. Aigenchain can generate a key here;
